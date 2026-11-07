@@ -2,7 +2,6 @@ import os
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from google import genai
 from dotenv import load_dotenv
 
@@ -43,7 +42,15 @@ async def process_voice(file: UploadFile = File(...), language_code: str = "en-I
             raise HTTPException(status_code=500, detail=f"Gnani STT Error: {response.text}")
 
         stt_result = response.json()
-        transcript = stt_result.get("transcript", "")
+
+        # Gnani STT returns the transcript under a "transcript" key.
+        # Guard against error-shaped payloads so we don't treat an STT
+        # failure as "no speech detected".
+        if not isinstance(stt_result, dict) or "transcript" not in stt_result:
+            detail = stt_result.get("error") or stt_result.get("message") or "Unexpected Gnani STT response"
+            raise HTTPException(status_code=500, detail=f"Gnani STT Error: {detail}")
+
+        transcript = stt_result["transcript"]
 
         if not transcript:
             return {"transcript": "", "code": "# No speech detected. Try speaking again."}
