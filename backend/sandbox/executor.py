@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ..pipeline.errors import SandboxError, ToolExecutionError
+from pipeline.errors import SandboxError, ToolExecutionError
 
 SANDBOX_ROOT = Path(tempfile.gettempdir()) / "leo-sandbox"
 SANDBOX_ROOT.mkdir(parents=True, exist_ok=True)
@@ -53,29 +53,32 @@ class SandboxExecutor:
         resolved.write_text(code, encoding="utf-8")
         return str(resolved)
 
-    def run(self, workspace: Path, script: str, args: list[str] | None = None) -> str:
+    def run(self, workspace: Path, script_path: str, args: list[str] | None = None) -> str:
         """Execute a script within the workspace in a fresh subprocess.
 
         Only ``python`` / ``node`` scripts may be executed; binary/file
         removal and shell concatenation are deliberately blocked.
         """
         executable = None
-        if script.endswith(".py"):
+        if script_path.endswith(".py"):
             executable = sys.executable
         elif script.endswith(".js") or script.endswith(".mjs"):
             executable = os.environ.get("NODE_BINARY") or "node"
         else:
             raise SandboxExecutionError(f"Unsupported script type: {script}")
 
-        filename = os.path.basename(script)
-        script_path = workspace / filename
+        script_path = (workspace / script_path).resolve()
 
         # Only trusted interpreters are allowed; block shell pipelines and
         # arbitrary binary execution.
-        if not script_path.suffix in {".py", ".js", ".mjs"}:
+        resolved = script_path
+        if not str(resolved).startswith(str(workspace.resolve())):
+            raise SandboxExecutionError("Path escapes the workspace")
+        resolved = resolved
+        if resolved.suffix not in {".py", ".js", ".mjs"}:
             raise SandboxExecutionError("Only .py/.js/.mjs scripts may be run")
 
-        script_path.write_text(script, encoding="utf-8")
+        script_path.write_text(self.read(workspace, script_path), encoding="utf-8")
         args = args or []
 
         try:

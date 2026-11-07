@@ -2,19 +2,35 @@
 
 The orchestrator is the agent-reasoning layer. Given the transcribed
 voice command it asks an LLM to produce a JSON tool-call plan.
-Production deployments would point at Gnani Evon; this module keeps a
-pluggable interface so the real orchestrator can be swapped in.
+
+This module exposes a pluggable interface so the real Gnani Evon HTTP
+API can be swapped in with a single line change. The endpoint contract
+is:
+
+    POST https://api.vachana.ai/evon/v1/plan
+    {
+      "api_key": "...",
+      "transcript": "...",
+      "tools": [{"name": "...", "description": "..."}],
+    }
+
+    {
+      "action": "read | write | run | none",
+      "tool": "...",
+      "args": {...},
+      "reason": "...",
+      "steps": [{"tool": "...", "path": "...", "code": "...", "args": [...]}],
+    }
 """
 
 from __future__ import annotations
 
 import json
 import os
+import requests
 
-from .errors import OrchestratorError, ToolExecutionError
+from .errors import OrchestratorError
 
-# In a real build this would instantiate a Gnani Evon client. The
-# interface below keeps the controller layer free of downstream SDKs.
 EVON_URL = os.getenv("EVON_URL", "https://api.vachana.ai/evon/v1")
 EVON_API_KEY = os.getenv("GNANI_API_KEY")
 
@@ -48,68 +64,81 @@ def plan_from_transcript(transcript: str, tools: list[dict]) -> dict:
         OrchestratorError: If the orchestrator fails or the response is
         not valid tool-call JSON.
     """
-    available = "\n".join(f"  - {t['name']}: {t.get('description', '')}" for t in tools)
-
-    prompt = (
-        "Available tools:\n"
-        f"{available}\n\n"
-        f'User said: "{transcript}"\n\n'
-        f"{build_system_instruction()}\n\n"
-        "Respond with ONLY the JSON object described above."
+    available = "\n".join(
+        f"  - {t['name']}: {t.get('description', '')}" for t in tools
     )
 
-    # Real deployments call the Gnani Evon HTTP API here.
-    # This placeholder returns a deterministic sensible plan based on
-    # well-known voice intents so the controller can be exercised end to
-    # end without an orchestrator service present.
-    normalized = transcript.lower().strip()
-
-    plan = {
-        "action": "none",
-        "tool": None,
-        "args": {},
-        "reason": "No recognized tool intent",
-        "steps": [],
+    # Real deployments send this prompt to the Gnani Evon HTTP API.
+    payload = {
+        "transcript": transcript,
+        "tools": tools,
+        "system_instruction": build_system_instruction(),
     }
 
-    if any(word in normalized for word in ["read", "show", "view", "file", "open"]):
-        plan = {
-            "action": "read",
-            "tool": "read_file",
-            "args": {"path": "app/page.tsx"},
-            "reason": "User asked to show view code",
-            "steps": [{"tool": "read_file", "path": "app/page.tsx"}],
-        }
-    elif any(
-        word in normalized
-        for word in ["write", "create", "make", "build", "add", "new"]
-    ):
-        plan = {
-            "action": "write",
-            "tool": "write_file",
-            "args": {
-                "path": "app/page.tsx",
-                "code": "// placeholder written by orchestrator",
-            },
-            "reason": "User asked to create or add something",
-            "steps": [
-                {"tool": "write_file", "path": "app/page.tsx", "code": "// placeholder"}
-            ],
-        }
-    elif any(
-        word in normalized for word in ["run", "execute", "execute code", "run script"]
-    ):
-        plan = {
-            "action": "run",
-            "tool": "run_script",
-            "args": {"path": "sandbox.py"},
-            "reason": "User asked to run / execute code",
-            "steps": [{"tool": "run_script", "path": "sandbox.py"}],
-        }
-    else:
-        plan["action"] = "none"
-        plan["reason"] = "No tool intent matched; awaiting clearer command"
+    if EVON_API_KEY:
+        try:
+            response = requests.post(
+                EVON_URL,
+                json=payload,
+                headers={"X-API-Key-ID": EVON_API_KEY},
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as exc:
+            raise OrchestratorError(f"Evon API request failed: {exc}") from exc
 
-    # In a real build, POST prompt to EVON_URL and parse the JSON response
-    # from that service. The gateway keeps the same return shape.
-    return plan
+        if not isinstance(data, dict):
+            raise OrchestratorError("Evon returned a non-object response")
+
+        action = data.get("action")
+        if action not in {"read", "write", "run", "none"}:
+            raise OrchestratorError(f"Unexpected orchestrator action: {action!r}")
+
+        return {
+            "action": data.get("action", "none"),
+            "tool": data.get("tool"),
+            "args": data.get("args", {}),
+            "reason": data.get("reason", ""),
+            "steps": data.get("steps", []),
+        }
+
+    # Fallback: deterministic plan when no Evon API key is configured.
+    # Keeps the controller testable without the upstream service.
+    return _deterministic_plan(transcript, tools)
+
+
+def _deterministic_plan(transcript: str, tools: list[dict]) -> dict:
+    """Return a sensible plan when no Evon key is present."""
+    normalized = transcript.lower().strip()
+    path_map = {
+        "read": "app/page.tsx",
+        "write": "app/page.tsx",
+        "run": "sandbox.py",
+    }
+
+    if any(w in normalized for w in ["read", "show", "view", "file", "open"]):
+        action, tool = "read", "read_file"
+    elif any(w in normalized for w in ["write", "create", "make", "build", "add", "new"]):
+        action, tool = "write", "write_file"
+    elif any(w in normalized for w in ["run", "execute", "execute code", "run script"]):
+        action, tool = "run", "run_script"
+    else:
+        action, tool = "none", None
+
+    steps = []
+    if action in path_map:
+        if tool == "read_file":
+            steps.append({"tool": "read_file", "path": path_map[action]})
+        elif tool == "write_file":
+            steps.append({"tool": "write_file", "path": path_map[action], "code": "// placeholder"})
+        elif tool == "run_script":
+            steps.append({"tool": "run_script", "path": path_map[action]})
+
+    return {
+        "action": action,
+        "tool": tool,
+        "args": {},
+        "reason": "Deterministic fallback; configure GNANI_API_KEY for full orchestration",
+        "steps": steps,
+    }
