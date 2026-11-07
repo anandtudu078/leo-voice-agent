@@ -43,3 +43,6 @@ next-env.d.ts
 # ignore sibling project
 ../pathway/bdh-synaptic-memory-explainer/
 ../enterprises/
+
+# Build cache
+tsconfig.tsbuildinfo

@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Environment / secrets (do not commit)
+.env
+.env.local
+.env.*.local
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build
+.pyinstaller/
+dist/
+build/

@@ -33,13 +33,17 @@ async def process_voice(file: UploadFile = File(...), language_code: str = "en-I
 
         # 1. Send audio to Gnani STT API
         headers = {"X-API-Key-ID": GNANI_API_KEY}
-        files = {"audio_file": (file.filename, audio_bytes, file.content_type or "audio/wav")}
+        files = {
+            "audio_file": (file.filename, audio_bytes, file.content_type or "audio/wav")
+        }
         data = {"language_code": language_code, "model": "prisma-v3.0"}
 
         response = requests.post(GNANI_STT_URL, headers=headers, files=files, data=data)
 
         if response.status_code != 200:
-            raise HTTPException(status_code=500, detail=f"Gnani STT Error: {response.text}")
+            raise HTTPException(
+                status_code=500, detail=f"Gnani STT Error: {response.text}"
+            )
 
         stt_result = response.json()
 
@@ -47,13 +51,20 @@ async def process_voice(file: UploadFile = File(...), language_code: str = "en-I
         # Guard against error-shaped payloads so we don't treat an STT
         # failure as "no speech detected".
         if not isinstance(stt_result, dict) or "transcript" not in stt_result:
-            detail = stt_result.get("error") or stt_result.get("message") or "Unexpected Gnani STT response"
+            detail = (
+                stt_result.get("error")
+                or stt_result.get("message")
+                or "Unexpected Gnani STT response"
+            )
             raise HTTPException(status_code=500, detail=f"Gnani STT Error: {detail}")
 
         transcript = stt_result["transcript"]
 
         if not transcript:
-            return {"transcript": "", "code": "# No speech detected. Try speaking again."}
+            return {
+                "transcript": "",
+                "code": "# No speech detected. Try speaking again.",
+            }
 
         # 2. Generate Code using Gemini LLM based on transcribed voice command
         system_instruction = (
@@ -65,14 +76,11 @@ async def process_voice(file: UploadFile = File(...), language_code: str = "en-I
 
         llm_response = client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=f"{system_instruction}\n\nUser Request: {transcript}"
+            contents=f"{system_instruction}\n\nUser Request: {transcript}",
         )
         generated_code = llm_response.text
 
-        return {
-            "transcript": transcript,
-            "code": generated_code
-        }
+        return {"transcript": transcript, "code": generated_code}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
