@@ -99,10 +99,10 @@ npm run dev
 
 ## Environment variables
 
-| Variable           | Purpose                              |
-|--------------------|--------------------------------------|
-| `GNANI_API_KEY`    | Gnani API key for STT/TTS calls      |
-| `GEMINI_API_KEY`   | Google Gemini API key                |
+| Variable         | Purpose                         |
+| ---------------- | ------------------------------- |
+| `GNANI_API_KEY`  | Gnani API key for STT/TTS calls |
+| `GEMINI_API_KEY` | Google Gemini API key           |
 
 ## Learn more
 
