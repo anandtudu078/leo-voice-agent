@@ -1,111 +1,65 @@
-# Leo Voice Agent
+# Project Workspace
 
-A voice-driven full-stack app: a Next.js (React 19 + Next 16) frontend streams audio over WebSockets to a FastAPI backend, which hands the audio to Gnani STT and runs a Gemini 2.5 Flash code-generation step. The resulting code is displayed in the browser. The architecture is orchestrated by Gnani Evon.
+A dark, desktop-style **code workspace where you build your project by voice**.
 
-## Architecture
+Describe what you want — a file, a feature, a fix — and the agent reads, writes,
+runs, and ships it for you. The browser is a real code editor: file tree on the
+left, a syntax-highlighted editor in the middle, and a voice console below.
 
-```text
-FRONTEND NEXT.JS WORKBENCH
-   ▲
-   │  [1] Audio Streams via WebSockets
-   │
-   │  [5] WebSocket Update (Code Patch + Log Strings)
-   │
-BACKEND FASTAPI CONTROLLER
-   │
-   ├───────────────────────────────  [unreadable]ENT PIPELINE LAYER
-   │
-GNANI PRISMA (Speech-to-Text)          GNANI TIMBRE (Text-to-Speech)
-   │                                          ▲
-   ▼                                          │
-[2] Raw Text                               [6] Audio Stream
-   │                                          │
-   ▼                                          ▼
-GNANI EVON ORCHESTRATOR (Agent Reasoning / #1 BFCL v3)
-   │                                          ▲
-   │  [3] Function Trigger (Tool Call Intent) │
-   │                                          │
-   ▼                                          │
-[4] Tool Execution Results (Success / Terminal Errors)
-   │
-   ▼
-EXECUTION TOOLS (Read / Write / Run Scripts)
-   │
-   ▼
-WORKSPACE SANDBOX (sandbox.py / js)
-```
+## Stack
 
-### Data flow (numbered arrows in the diagram)
+- **Frontend:** Next.js 16 + React 19, Tailwind CSS 4, TypeScript strict
+- **Backend:** FastAPI (WebSocket `/ws/process-voice`, HTTP `/api/process-voice`, `/api/auth/signin`)
+- **Pipeline:** Gnani STT → Gemini/Evon orchestrator → sandbox tools (read/write/run) → Gnani TTS
 
-1. **[1] Audio Streams via WebSockets** — The Next.js frontend records microphone audio and streams it to the backend over WebSockets.
-2. **[2] Raw Text** — Gnani Prisma converts the audio to text.
-3. **[3] Function Trigger (Tool Call Intent)** — The Gnani Evon orchestrator interprets the transcript as a function-call / tool-intent request.
-4. **[4] Tool Execution Results (Success / Terminal Errors)** — Execution tool results (success or terminal errors) flow back into the orchestrator.
-5. **[5] WebSocket Update (Code Patch + Log Strings)** — The backend pushes a code patch and log strings to the frontend over WebSockets.
-6. **[6] Audio Stream** — Gnani Timbre (text-to-speech) streams audio back to the frontend.
-
-### Layers
-
-- **BACKEND FASTAPI CONTROLLER** — HTTP + WebSocket API layer. Receives audio, calls Gnani STT, drives the Gemini LLM, and coordinates the orchestrator.
-- **[unreadable]ENT PIPELINE LAYER** — The STT / LLM / TTS / orchestrator pipeline (partially cut off in the source diagram).
-- **GNANI PRISMA** — Speech-to-text model.
-- **GNANI TIMBRE** — Text-to-speech model.
-- **GNANI EVON ORCHESTRATOR** — Agent reasoning layer (ranked #1 on the BFCL v3 benchmark).
-- **EXECUTION TOOLS** — Read / write / run scripts.
-- **WORKSPACE SANDBOX** — `sandbox.py` / `js` sandbox for executing generated code.
-
-## Project layout
-
-```text
-.
-├── backend/
-│   ├── main.py               # FastAPI app: /api/process-voice endpoint
-│   ├── requirements.txt      # fastapi, uvicorn, requests, python-dotenv, pydantic, google-genai
-│   └── .env                  # GNANI_API_KEY, GEMINI_API_KEY
-├── frontend/
-│   ├── app/page.tsx          # Client UI: microphone + code display
-│   ├── app/layout.tsx        # Root layout (Geist sans/mono fonts)
-│   ├── app/globals.css       # Tailwind 4 + design tokens
-│   ├── next.config.ts        # Turbopack + tailwind config
-│   └── package.json          # React 19, Next 16.4.5, Tailwind 4
-└── pyproject.toml            # uv-managed backend project (Python >= 3.14)
-```
-
-## Getting started
-
-### Backend
+## Run it
 
 ```bash
-cd backend
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
-
-pip install -r requirements.txt
-# Copy .env (contains GNANI_API_KEY and GEMINI_API_KEY)
-uvicorn main:app --reload --port 8000
-```
-
-### Frontend
-
-```bash
+# Terminal 1 — Frontend (http://localhost:3000)
 cd frontend
 npm install
 npm run dev
-# Open http://localhost:3000
+
+# Terminal 2 — Backend (http://localhost:8000)
+cd backend
+pip install -r requirements.txt
+cp .env.example .env   # GNANI_API_KEY, GEMINI_API_KEY
+uv run main:app --reload --port 8000
 ```
 
-## Environment variables
+## Navigation
 
-| Variable         | Purpose                         |
-| ---------------- | ------------------------------- |
-| `GNANI_API_KEY`  | Gnani API key for STT/TTS calls |
-| `GEMINI_API_KEY` | Google Gemini API key           |
+- `/` — Landing page: project intro + sign in
+- `/code` — The code workspace (voice-controlled IDE, requires sign in)
+- `/api/auth/signin` — Demo sign-in endpoint (any well-formed email accepted)
 
-## Learn more
+## Window layout
 
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Learn Next.js](https://nextjs.org/learn)
-- [FastAPI Docs](https://fastapi.tiangolo.com)
+- **Header:** `Code Space` + owner email, `Live` badge, `Sign out`
+- **Left sidebar:** file tree (open/create/delete), voice command to switch files
+- **Middle:** syntax-highlighted code editor with line numbers, `Save` and `Run` buttons
+- **Bottom console:** voice transcript + agent logs + agent's spoken reply
+
+## Workspaces & tools
+
+| Tool | Description |
+| --- | --- |
+| `read_file` | Read a file from the workspace |
+| `write_file` | Create / overwrite a file in the workspace |
+| `run_script` | Execute a `.py` / `.js` script in an isolated sandbox |
+
+Environment variables are loaded from `.env`:
+
+- `GNANI_API_KEY` — Gemini (LLM) key
+- `GNANI_STT_URL` / `GNANI_TTS_URL` — Gnani speech services
+- `LEO_WORKSPACE_ROOT` — workspace root for generated code (defaults to `.`)
+- `LEO_SESSION_SECRET` — optional session-signing secret (auto-generated if unset)
+
+## Notes
+
+- Auth is **demo**: any well-formed email is accepted, and there is no password
+  verification or database. The session is a signed `freebuff_session` cookie that
+  the client mirrors into `localStorage`, so the landing page and the code space
+  share the same signed-in state.
+- The sandbox runs scripts in an isolated workspace rooted at `leo-sandbox`
+  (defaults to `tempfile.gettempdir() / "leo-sandbox"`).
