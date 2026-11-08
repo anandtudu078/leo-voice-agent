@@ -30,12 +30,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Imported after load_dotenv() so a DATABASE_URL from .env is picked up when
+# the engine is created.
+import repository
+from db import init_db
+
 
 # ---------------------------------------------------------------------------
 # Session store
 #
-# The project has no database yet, so the session is held in memory and
-# mirrored to a signed cookie on the client. Signing uses a project secret
+# Users live in the database (a row is created on first sign-in) and the
+# session itself is a signed cookie. Signing uses a project secret
 # (LEO_SESSION_SECRET) with a strong random fallback so tokens cannot be
 # forged.
 # ---------------------------------------------------------------------------
@@ -50,11 +55,16 @@ def _sign(payload: bytes) -> str:
     return hmac.new(_LEO_SESSION_SECRET.encode(), payload, hashlib.sha256).hexdigest()
 
 
-def _encode_session(email: str) -> str:
-    """Return a signed session token for `email`."""
-    now = datetime.now(timezone.utc).isoformat()
+def _encode_session(email: str, user_id: int | None = None) -> str:
+    """Return a signed session token for `email` and its database id."""
+    now = datetime.now(timezone.utc)
     payload = json.dumps(
-        {"email": email, "iat": now, "exp": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()},
+        {
+            "email": email,
+            "uid": user_id,
+            "iat": now.isoformat(),
+            "exp": (now + timedelta(days=7)).isoformat(),
+        },
         separators=(",", ":"),
     ).encode()
     # Sign the encoded payload: _decode_session verifies the base64 segment.
@@ -82,9 +92,9 @@ def _decode_session(token: str) -> dict | None:
         return None
 
 
-def write_session(email: str) -> str:
+def write_session(email: str, user_id: int | None = None) -> str:
     """Create a signed session token for `email`."""
-    return _encode_session(email)
+    return _encode_session(email, user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +125,10 @@ class SignInResponse(JSONResponse):
 
 app = FastAPI(title="Leo Voice Agent API")
 
+# Create missing tables on import so a fresh clone and the test suite work
+# without a separate migration step.
+init_db()
+
 
 @app.middleware("http")
 async def attach_session(request: Request, call_next):
@@ -144,8 +158,11 @@ async def auth_signin(req: SignInRequest):
     if "@" not in email:
         return JSONResponse({"detail": "Enter a valid email address."}, status_code=400)
 
-    token = write_session(email)
-    return SignInResponse({"user": {"email": email}, "_session": token})
+    user = await asyncio.to_thread(repository.get_or_create_user, email)
+    token = write_session(user["email"], user["id"])
+    return SignInResponse(
+        {"user": {"email": user["email"], "id": user["id"]}, "_session": token}
+    )
 
 
 @app.get("/api/auth/me")
@@ -154,7 +171,15 @@ async def auth_me(request: Request):
     session = request.state.session
     if not session or not session.get("email"):
         raise HTTPException(status_code=401, detail="Not signed in")
-    return {"user": {"email": session["email"]}}
+
+    user = None
+    if session.get("uid") is not None:
+        user = await asyncio.to_thread(repository.get_user, session["uid"])
+    if user is None:
+        user = await asyncio.to_thread(repository.get_user_by_email, session["email"])
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return {"user": {"email": user["email"], "id": user["id"]}}
 
 
 @app.post("/api/auth/signout")
@@ -244,7 +269,7 @@ from sandbox import SandboxExecutionError, SandboxExecutor
 stt_client = GnaniSTTClient()
 tts_client = GnaniTTSClient()
 
-# The voice IDE edits a single workspace directory. Files never leave it.
+# The voice IDE edits one workspace directory per user. Files never leave it.
 RUN_SCRIPT_NAME = "snippet.py"
 
 
@@ -257,14 +282,33 @@ def _workspace_root() -> Path:
 workspace_executor = SandboxExecutor(root=_workspace_root())
 
 
-def _workspace() -> Path:
-    """Return the workspace directory shared by the voice IDE endpoints."""
-    return workspace_executor.workspace("")
+def _workspace_for(user_id: int | None) -> Path:
+    """Return the workspace directory owned by `user_id`.
+
+    Signed-in users get their own directory; requests without a session share
+    a clearly named ``anonymous`` directory so local checks still work.
+    """
+    label = f"user-{user_id}" if user_id is not None else "anonymous"
+    return workspace_executor.workspace(label)
 
 
-def _workspace_files() -> list[dict]:
+async def _workspace_context(session: dict | None) -> tuple[Path, int | None]:
+    """Resolve the caller's workspace directory and database workspace id."""
+    user_id = (session or {}).get("uid")
+    if user_id is None:
+        return _workspace_for(None), None
+    workspace_id = await asyncio.to_thread(repository.get_or_create_workspace, user_id)
+    return _workspace_for(user_id), workspace_id
+
+
+def _websocket_session(websocket: WebSocket) -> dict | None:
+    """Decode the session cookie sent with a WebSocket handshake."""
+    token = websocket.cookies.get(SESSION_COOKIE)
+    return _decode_session(token) if token else None
+
+
+def _workspace_files(workspace: Path) -> list[dict]:
     """List the workspace files as {"path", "name", "kind"} entries."""
-    workspace = _workspace()
     entries: list[dict] = []
     for path in sorted(workspace.rglob("*")):
         if not path.is_file():
@@ -357,11 +401,12 @@ async def websocket_process_voice(websocket: WebSocket):
         {"type": "error", "error": "..."}
     """
     await websocket.accept()
+    workspace, workspace_id = await _workspace_context(_websocket_session(websocket))
     await websocket.send_json(
         {
             "type": "ready",
             "message": "Leo is listening. Speak or send a command.",
-            "files": _workspace_files(),
+            "files": _workspace_files(workspace),
         }
     )
 
@@ -381,6 +426,10 @@ async def websocket_process_voice(websocket: WebSocket):
                 "text": reply,
             }
         )
+        if workspace_id is not None:
+            await asyncio.to_thread(
+                repository.record_voice_turn, workspace_id, transcript, reply
+            )
         await websocket.send_json({"type": "listening", "message": "I'm listening now."})
 
     async def handle_audio(audio: bytes) -> None:
@@ -423,7 +472,6 @@ async def websocket_process_voice(websocket: WebSocket):
 
             msg_type = payload.get("type")
             path = str(payload.get("path") or "")
-            workspace = _workspace()
 
             if msg_type == "audio":
                 try:
@@ -449,18 +497,21 @@ async def websocket_process_voice(websocket: WebSocket):
                 await websocket.send_json({"type": "file", "path": path, "content": content})
 
             elif msg_type in {"create_file", "write_file"}:
+                code = str(payload.get("code") or "")
                 try:
-                    saved = workspace_executor.write(
-                        workspace, path, str(payload.get("code") or "")
-                    )
+                    saved = workspace_executor.write(workspace, path, code)
                 except SandboxExecutionError as exc:
                     await websocket.send_json({"type": "error", "error": str(exc)})
                     continue
+                if workspace_id is not None and path:
+                    await asyncio.to_thread(
+                        repository.save_file_snapshot, workspace_id, path, code
+                    )
                 await websocket.send_json(
                     {
                         "type": "logs",
                         "logs": [f"> Saved {path} ({saved})"],
-                        "files": _workspace_files(),
+                        "files": _workspace_files(workspace),
                     }
                 )
 
@@ -470,8 +521,16 @@ async def websocket_process_voice(websocket: WebSocket):
                 except SandboxExecutionError as exc:
                     await websocket.send_json({"type": "error", "error": str(exc)})
                     continue
+                if workspace_id is not None and path:
+                    await asyncio.to_thread(
+                        repository.delete_file_snapshot, workspace_id, path
+                    )
                 await websocket.send_json(
-                    {"type": "logs", "logs": [f"> Deleted {path}"], "files": _workspace_files()}
+                    {
+                        "type": "logs",
+                        "logs": [f"> Deleted {path}"],
+                        "files": _workspace_files(workspace),
+                    }
                 )
 
             elif msg_type == "run_script":
@@ -538,6 +597,7 @@ async def websocket_talk(websocket: WebSocket):
         Server -> Client : {"type": "done", "message": "..."}
     """
     await websocket.accept()
+    workspace, workspace_id = await _workspace_context(_websocket_session(websocket))
     await websocket.send_json({"type": "ready", "message": "Leo is listening. Speak or type."})
 
     pending_audio: list[bytes] = []
@@ -585,6 +645,10 @@ async def websocket_talk(websocket: WebSocket):
                             await websocket.send_json(
                                 {"type": "speech", "audio": base64.b64encode(b"").decode("ascii")}
                             )
+                        if workspace_id is not None:
+                            await asyncio.to_thread(
+                                repository.record_voice_turn, workspace_id, text, reply
+                            )
                         await websocket.send_json({"type": "listening", "message": "I'm listening now."})
                     except HTTPException as exc:
                         await websocket.send_json({"type": "error", "message": exc.detail})
@@ -597,7 +661,6 @@ async def websocket_talk(websocket: WebSocket):
                 if code:
                     await websocket.send_json({"type": "code", "code": code})
                     try:
-                        workspace = _workspace()
                         workspace_executor.write(workspace, RUN_SCRIPT_NAME, code)
                         result = await asyncio.to_thread(
                             workspace_executor.run, workspace, RUN_SCRIPT_NAME
@@ -673,13 +736,10 @@ async def not_found_handler(request, exc):
 
 
 @app.get("/api/files")
-async def list_files(directory: str = "session"):
-    """List files under the workspace (relative path, no traversal)."""
-    from pathlib import Path
-
-    root = Path(os.getenv("LEO_WORKSPACE_ROOT", ".")).resolve()
-    if not os.path.exists(root):
-        root.mkdir(parents=True, exist_ok=True)
+async def list_files(request: Request, directory: str = ""):
+    """List files under the caller's own workspace (no traversal)."""
+    workspace, _ = await _workspace_context(request.state.session)
+    root = workspace.resolve()
 
     target = (root / directory).resolve()
     try:
@@ -693,9 +753,9 @@ async def list_files(directory: str = "session"):
     files = []
     directories = []
     for p in sorted(target.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
-        rel = p.relative_to(root)
+        rel = p.relative_to(root).as_posix()
         if p.is_dir():
-            directories.append(str(rel) + "/")
+            directories.append(rel + "/")
         else:
             try:
                 size = p.stat().st_size
@@ -703,6 +763,19 @@ async def list_files(directory: str = "session"):
                 size = 0
             files.append(f"{rel} ({size}B)")
     return {"files": files, "directories": directories, "path": str(target)}
+
+
+@app.get("/api/history")
+async def voice_history(request: Request, limit: int = 50):
+    """Return the signed-in user's recent voice turns, newest first."""
+    session = request.state.session
+    if not session or session.get("uid") is None:
+        return {"turns": []}
+    workspace_id = await asyncio.to_thread(
+        repository.get_or_create_workspace, session["uid"]
+    )
+    turns = await asyncio.to_thread(repository.list_voice_turns, workspace_id, limit)
+    return {"turns": turns}
 
 
 # ---------------------------------------------------------------------------
