@@ -631,3 +631,68 @@ const sortedCommands = React.useMemo(() => {
     return acc
   }, [] as string[])
 }, [commandFrequency])
+
+// ---- Phase 4: Advanced Features ----
+// Voice collaboration & multi-user support
+const [collaborationMode, setCollaborationMode] = useState(false)
+const [sharedCursor, setSharedCursor] = useState({ x: 0, y: 0, userId: '' })
+const [collaborators, setCollaborators] = useState<Array<{ userId: string; name: string; connectedAt: number }>>([])
+
+// AI-assisted coding enhancements
+const [aiSuggestions, setAISuggestions] = useState<Array<{
+  id: string
+  type: 'refactor' | 'test' | 'doc' | 'fix'
+  title: string
+  description: string
+  code?: string
+  confidence: number
+}>>([])
+const [isGeneratingAI, setIsGeneratingAI] = useState(false)
+
+// Voice biometrics and user tracking
+const [userId, setUserId] = useState(generateUserId())
+const [voicePrint, setVoicePrint] = useState<Array<number>>([])
+
+// Docker and deployment state
+const [isBuildingDocker, setIsBuildingDocker] = useState(false)
+const [dockerLog, setDockerLog] = useState<string>('')
+
+// Generate a unique user ID
+function generateUserId(): string {
+  return 'user_' + Math.random().toString(36).substr(2, 9)
+}
+
+// Track collaboration connection
+const connectCollaboration = () => {
+  setCollaborationMode(true)
+  // In a real implementation, this would connect to a signaling server
+  setCollaborators(prev => [...prev, { userId, name: 'You', connectedAt: Date.now() }])
+}
+
+// Disconnect collaboration
+const disconnectCollaboration = () => {
+  setCollaborationMode(false)
+  setCollaborators(prev => prev.filter(c => c.userId !== userId))
+}
+
+// Add AI suggestion
+const addAISuggestion = (suggestion: {
+  type: 'refactor' | 'test' | 'doc' | 'fix'
+  title: string
+  description: string
+  code?: string
+  confidence: number
+}) => {
+  setAISuggestions(prev => [...prev, { id: Date.now().toString(), ...suggestion }])
+}
+
+// Generate Docker deployment
+const generateDockerDeploy = () => {
+  setIsBuildingDocker(true)
+  setDockerLog('Building Docker image...')
+  // In a real implementation, this would call a deployment API
+  setTimeout(() => {
+    setIsBuildingDocker(false)
+    setDockerLog('Docker image built successfully!')
+  }, 2000)
+}
