@@ -5,8 +5,7 @@ import { useAuthStore } from '@/app/auth'
 import Editor from 'react-simple-code-editor'
 
 // ---------------------------------------------------------------------------
-// Code-space IDE — undo the header comment so it ships as a clean, runnable
-// workspace. Dashed comment to be removed before the actual upstream push.
+// Code-space IDE — clean, runnable voice workspace.
 // ---------------------------------------------------------------------------
 
 /**
@@ -25,30 +24,74 @@ import Editor from 'react-simple-code-editor'
  *   appended to the console and (for read/write run tools) surfaced in the
  *   file browser / editor.
  */
-
 export default function CodeSpace() {
-  const { session, signOut } = useAuthStore()
+  // The backend now owns the session: it stores it in an HttpOnly cookie and
+  // exposes /api/auth/me + /api/auth/signout. This component reads the same
+  // session the backend knows about, so the IDE never relies on the
+  // client's localStorage mirror anymore.
+  const [user, setUser] = useState<{ email: string }>(() => ({ email: '' }))
+  // ---- Voice status state machine ----
+  //   idle          -> not connected / waiting for voice input
+  //   listening     -> user started recording (or agent says "listening")
+  //   processing    -> agent is generating a reply
+  //   disconnected  -> WebSocket lost / error
+  //   ready         -> WebSocket connected and idle
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'>('idle')
 
-  if (!session || !session.user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0b0f19]">
-        <div className="text-center">
-          <p className="text-white text-lg">Please sign in to open the code space.</p>
-          <a
-            href="/"
-            className="mt-4 inline-block px-5 py-2.5 rounded-md bg-[#635bff] text-white font-medium hover:opacity-90"
-          >
-            Back to landing
-          </a>
-        </div>
-      </div>
-    )
-  }
+  // ---- Pipeline stage states ----\n  // Track real-time status of STT, Agent, TTS pipeline stages\n  const [sttStatus, setSttStatus] = useState<'idle' | 'listening' | 'error'>('idle')\n  const [agentStatus, setAgentStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle')\n  const [ttsStatus, setTtsStatus] = useState<'idle' | 'speaking' | 'error'>('idle')\n\n  const [signOutFn, setSignOutFn] = useState<(() => void) | null>(() => null)
 
-  return <CodeSpaceShell user={session.user} signOut={signOut} />
+  // The backend now owns the session: it stores it in an HttpOnly cookie and
+  // exposes /api/auth/me + /api/auth/signout. Sync the local email state
+  // with what the backend reports, falling back to an empty email when the
+  // user is not signed in.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    (async () => {
+      try {
+        const res = await fetch('http://localhost:8000/api/auth/me', { cache: 'no-store' })
+        let email = ''
+        if (res.ok) {
+          const data = await res.json().catch(() => null)
+          if (data && typeof data === 'object') {
+            const user = (data as { user?: unknown }).user
+            if (user && typeof user === 'object') {
+              const candidate = (user as { email?: unknown }).email
+              if (typeof candidate === 'string' && candidate) email = candidate
+            }
+          }
+        }
+        setUser({ email })
+        setSignOutFn(signOutFn)
+      } catch {
+        setUser({ email: '' })
+        setSignOutFn(null)
+      }
+    })()
+  }, [])
+
+  return (
+    // ---- Voice Status Bar ---<
+  <VoiceStatusBar
+    voiceStatus={voiceStatus}
+    sttStatus={sttStatus}
+    agentStatus={agentStatus}
+    ttsStatus={ttsStatus}
+  />
+  // ---- Pipeline Visualizer ---<
+  <PipelineVisualizer
+    sttStatus={sttStatus}
+    agentStatus={agentStatus}
+    ttsStatus={ttsStatus}
+  />
+
+  <CodeSpaceShell
+    user={user}
+    signOut={signOutFn}
+  />
+)
 }
 
-function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: () => void }) {
+function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (() => void) | null }) {
   // ---- State ----
   const [files, setFiles] = useState<{ path: string; kind: 'file' | 'dir'; name: string }[]>([])
   const [tree, setTree] = useState<{ path: string; kind: 'file' | 'dir'; name: string }[]>([])
@@ -59,7 +102,7 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
   const [loading, setLoading] = useState(false)
   const [socket, setSocket] = useState<WebSocket | null>(null)
   const [connections, setConnections] = useState(0)
-  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening'>('idle')
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'>('idle')
   const [recording, setRecording] = useState(false)
   const [viewMode, setViewMode] = useState<'all' | 'open'>('all')
   const [workspace, setWorkspace] = useState<string | null>(null)
@@ -67,10 +110,18 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
   const [lineCount, setLineCount] = useState(0)
   const [scrollEnd, setScrollEnd] = useState(false)
 
+  // ---- Voice status badges ----
+  const statusConfig = {
+    idle:      { label: 'Idle', css: 'bg-white/5 text-white/40' },
+    listening: { label: 'Listening', css: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+    processing: { label: 'Processing', css: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+    disconnected: { label: 'Disconnected', css: 'bg-red-500/20 text-red-400 border-red-500/30' },
+    ready:     { label: 'Live', css: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+  } as const
+  const status = statusConfig[voiceStatus]
+
   const socketRef = useRef<WebSocket | null>(null)
   socketRef.current = socket
-
-  // ---- Session ----
 
   // ---- File listing: when a file is active, fetch its content from the
   // backend's read_file tool over the voice WebSocket so the IDE reflects
@@ -92,6 +143,8 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
     socketRef.current = ws
 
     ws.onopen = () => {
+      // WebSocket connected — back to idle/ready state
+      setVoiceStatus('ready')
       ws.send(JSON.stringify({ language_code: 'en-IN' }))
     }
 
@@ -104,21 +157,40 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
           logs?: string[]
           speech?: string
           error?: string
+          message?: string
         }
 
         switch (msg.type) {
+          case 'turn-started':
+            // Agent started thinking — transition to processing
+            setVoiceStatus('processing')
+            break
+          case 'waiting':
+            // Agent says "Thinking..." — keep processing
+            setVoiceStatus('processing')
+            break
+          case 'listening':
+            // Agent said it's listening (e.g. after finishing a reply)
+            setVoiceStatus('listening')
+            break
+          case 'closed':
+            // Agent closed the voice session
+            setVoiceStatus('ready')
+            break
           case 'transcript':
             setTranscript(msg.transcript || '')
-            setVoiceStatus('idle')
+            setVoiceStatus('ready')
             break
           case 'code':
             setLogs((prev) => [...prev, `{ Agent: ${msg.code || ''} }`])
             if (msg.code && msg.code.includes('FileContent')) {
               setLogs((prev) => [...prev, `{ Agent read: ${msg.code} }`])
             }
+            setVoiceStatus('ready')
             break
           case 'logs':
             setLogs((prev) => [...prev, ...(msg.logs || [])])
+            setVoiceStatus('ready')
             break
           case 'speech':
             try {
@@ -133,13 +205,16 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
                 audio.play().catch(() => {})
                 URL.revokeObjectURL(url)
               }
+              // Log the agent's spoken reply using the pending transcript
               setLogs((prev) => [...prev, `{ Agent says: ${transcript || '<reply>'} }`])
             } catch {
               // ignore audio decode errors
             }
+            setVoiceStatus('ready')
             break
           case 'error':
             setLogs((prev) => [...prev, `ERROR: ${msg.error || ''}`])
+            setVoiceStatus('disconnected')
             break
         }
       } catch {
@@ -149,10 +224,12 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
 
     ws.onclose = () => {
       setConnections((c) => c - 1)
+      setVoiceStatus('idle')
     }
 
     ws.onerror = () => {
       setConnections((c) => c - 1)
+      setVoiceStatus('disconnected')
     }
   }, [transcript])
 
@@ -243,11 +320,18 @@ if __name__ == "__main__":
   const startRecording = async () => {
     setLoading(true)
     setLogs((prev) => [...prev, `> User spoke (listening...)`])
-    setVoiceStatus('listening')
+    // If the WebSocket is already connected, set status to listening
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      setVoiceStatus('listening')
+    } else {
+      // Just initializing — the agent will set the status when it connects
+      setVoiceStatus('listening')
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream)
       const chunks: BlobPart[] = []
+
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunks.push(event.data)
       }
@@ -280,12 +364,6 @@ if __name__ == "__main__":
     if (document.querySelector('audio')) document.querySelector('audio')!.remove()
   }
 
-  // ---- Derived ----
-  const activeFileData = useMemo(() => {
-    if (!activeFile) return null
-    return tree.find((f) => f.path === activeFile) || null
-  }, [activeFile, tree])
-
   const fileCount = tree.filter((f) => f.kind === 'file').length
   const dirCount = tree.filter((f) => f.kind === 'dir').length
 
@@ -304,21 +382,24 @@ if __name__ == "__main__":
           <div>
             <h1 className="text-lg font-bold leading-tight">Code Space</h1>
             <p className="text-xs text-white/50">
-              {user.email} — {workspace || 'workspace root'}
+              {user.email ? `${user.email} — workspace root` : 'workspace root'}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs text-white/60">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            live
+          {/* Voice status badge */}
+          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border ${status.css}`}>
+            <span className="w-1.5 h-1.5 rounded-full bg-current" />
+            <span className="text-xs font-medium">{status.label}</span>
           </div>
-          <button
-            onClick={signOut}
-            className="px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/80 transition-colors"
-          >
-            Sign out
-          </button>
+          {signOut && (
+            <button
+              onClick={signOut}
+              className="px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/80 transition-colors"
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 
