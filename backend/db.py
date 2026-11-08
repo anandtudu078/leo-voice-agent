@@ -64,6 +64,18 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
 
 
+def ping_database() -> bool:
+    """Return True when the configured database answers a trivial query."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except Exception:  # noqa: BLE001 - a health probe must never raise
+        return False
+
+
 @contextmanager
 def session_scope() -> Iterator[Session]:
     """Open a session, commit on success, and always close it."""

@@ -197,6 +197,30 @@ npm run dev
 |--------------------|--------------------------------------|
 | `GNANI_API_KEY`    | Gnani API key for STT/TTS calls      |
 | `GEMINI_API_KEY`   | Google Gemini API key                |
+| `DATABASE_URL`     | Postgres URL (Neon); falls back to local SQLite at `.data/leo.db` when unset |
+| `LEO_SESSION_SECRET` | Secret used to sign session cookies |
+| `LEO_WORKSPACE_ROOT` | Directory holding per-user workspaces (default `session`) |
+
+## Deployment (Render)
+
+The backend is a **Python** FastAPI service. `render.yaml` declares it as one;
+the repo contains no Node backend, so a service configured with the Node
+runtime fails at start with `Cannot find module .../backend/dist/server.js`.
+
+If the service already exists, fix it in **Settings**:
+
+| Setting | Value |
+|---------|-------|
+| Language / Runtime | `Python 3` |
+| Root Directory | `backend` |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Health Check Path | `/api/health` |
+
+Deploy a branch that contains this config (the `main` branch may lag behind),
+then set `DATABASE_URL` to your Postgres URL. Without it the service starts on
+SQLite, which is wiped on every deploy. `pip install uvicorn[standard]` is
+required for the `/ws/*` endpoints.
 
 ## Learn more
 

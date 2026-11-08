@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from google import genai
@@ -33,7 +34,7 @@ load_dotenv()
 # Imported after load_dotenv() so a DATABASE_URL from .env is picked up when
 # the engine is created.
 import repository
-from db import init_db
+from db import init_db, ping_database
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +126,28 @@ class SignInResponse(JSONResponse):
 
 app = FastAPI(title="Leo Voice Agent API")
 
+# CORS middleware — allow the Vercel frontend (and localhost for dev)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        os.getenv("FRONTEND_URL", "http://localhost:3000"),
+        "https://leo-voice-agent.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Create missing tables on import so a fresh clone and the test suite work
 # without a separate migration step.
 init_db()
+
+
+@app.get("/api/health")
+async def health():
+    """Liveness probe for Render (and any uptime monitor)."""
+    database_ok = await asyncio.to_thread(ping_database)
+    return {"status": "ok", "database": "connected" if database_ok else "unavailable"}
 
 
 @app.middleware("http")
@@ -795,4 +815,4 @@ async def tts_synthesize(text: str):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)

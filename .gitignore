@@ -12,6 +12,10 @@
 .env
 .env.*
 
+# Local SQLite fallback used when DATABASE_URL is unset
+/.data/
+/backend/session/
+
 # OS / editor
 .DS_Store
 *.log

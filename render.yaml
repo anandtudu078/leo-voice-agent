@@ -1,0 +1,25 @@
+services:
+  # FastAPI backend. Render must run this as a *Python* service: the repo has
+  # no Node backend, so a Node runtime has nothing to start (the symptom is
+  # "Cannot find module .../backend/dist/server.js").
+  - type: web
+    name: leo-voice-agent-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: LEO_SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GNANI_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
