@@ -20,6 +20,24 @@ A voice-driven full-stack app: a Next.js (React 19 + Next 16) frontend streams a
 - **Enhanced Execution Results** — Detailed tracking with pass/fail indicators for tests, output, errors, and TTS audio
 - **Voice Command Learning** — Tracks frequently used commands and prioritizes them in the palette via frequency mapping
 
+## ✨ Features
+
+### Phase 1: Voice IDE Status Indicators
+- **Voice Status Bar** — Fixed top-center display showing real-time voice state (idle/listening/processing/error/ready) with color-coded pulses and animations
+- **Pipeline Visualizer** — Three colored dots (STT → Agent → TTS) showing live pipeline stage status with staggered bounce animations
+- **Voice State Management** — Integrated state machine tracking voice status transitions via WebSocket messages
+
+### Phase 2: Command Workflow
+- **Voice Command History** — Scrollable area showing recent transcripts, generated code, execution results, and TTS audio players
+- **Command Palette** — Cmd+K / Ctrl+K inspired searchable palette with quick actions (New Project, Open File, Refactor, Debug, New Terminal)
+- **Context-Aware Prompting** — Dynamic suggestion box that updates based on detected context (file-viewed, recent-actions, selection)
+
+### Phase 3: Hands-Free & Persistence
+- **Hands-Free Recording Mode** — Toggle continuous listening without keyboard interaction
+- **Voice Session Persistence** — Remembers last active file, voice history memory, focused file, and recent files across sessions
+- **Enhanced Execution Results** — Detailed tracking with pass/fail indicators for tests, output, errors, and TTS audio
+- **Voice Command Learning** — Tracks frequently used commands and prioritizes them in the palette via frequency mapping
+
 ## Architecture
 
 ```text
