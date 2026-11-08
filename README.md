@@ -242,6 +242,22 @@ then set `DATABASE_URL` to your Postgres URL. Without it the service starts on
 SQLite, which is wiped on every deploy. The `uvicorn[standard]` extra is
 required for the `/ws/*` endpoints.
 
+## Smoke test
+
+With the service running (locally or on Render), verify the deployed surface end
+to end:
+
+```bash
+python scripts/smoke_test.py
+python scripts/smoke_test.py --url http://localhost:8000 --timeout 15
+```
+
+It checks `/api/health` (status and database), `/openapi.json`, and a
+`/ws/process-voice` handshake, then exits non-zero if any check fails. Set
+`SMOKE_BASE_URL` to change the default target
+(`https://leo-voice-agent.onrender.com`). It needs `requests` and `websockets`,
+both of which the backend requirements already install.
+
 ## Learn more
 
 - [Next.js Documentation](https://nextjs.org/docs)

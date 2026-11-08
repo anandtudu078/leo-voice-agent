@@ -99,64 +99,6 @@ def write_session(email: str, user_id: int | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Auth endpoints
-
-
-class SignupRequest(BaseModel):
-    email: str
-
-
-class LoginRequest(BaseModel):
-    email: str
-
-
-@app.post("/api/auth/signup")
-async def auth_signup(request: Request, payload: SignupRequest):
-    """Create a new user account and sign them in."""
-    user = await asyncio.to_thread(repository.get_or_create_user, payload.email)
-    token = write_session(payload.email, user["id"])
-    response = JSONResponse({"session": token, "user": user})
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=token,
-        max_age=SESSION_MAX_AGE,
-        httponly=True,
-        path="/",
-        secure=False,
-        samesite="lax",
-    )
-    return response
-
-
-@app.post("/api/auth/login")
-async def auth_login(request: Request, payload: LoginRequest):
-    """Sign in existing user."""
-    user = await asyncio.to_thread(repository.get_or_create_user, payload.email)
-    token = write_session(payload.email, user["id"])
-    response = JSONResponse({"session": token, "user": user})
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=token,
-        max_age=SESSION_MAX_AGE,
-        httponly=True,
-        path="/",
-        secure=False,
-        samesite="lax",
-    )
-    return response
-
-
-@app.get("/api/auth/me")
-async def auth_me(request: Request):
-    """Return current user info from session."""
-    session = request.state.session
-    if not session or session.get("uid") is None:
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-    user = await asyncio.to_thread(repository.get_user, session["uid"])
-    if user is None:
-        return JSONResponse(status_code=401, content={"detail": "User not found"})
-    return JSONResponse(content=user)
-# ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
 
@@ -180,6 +122,28 @@ class SignInResponse(JSONResponse):
             samesite="Lax",
             max_age=SESSION_MAX_AGE,
         )
+
+
+class EmailRequest(BaseModel):
+    email: str
+
+
+def _email_signin_response(user: dict) -> JSONResponse:
+    """Sign `user` in and return the same shape as /api/auth/signin."""
+    token = write_session(user["email"], user["id"])
+    response = JSONResponse(
+        {"user": {"email": user["email"], "id": user["id"]}, "_session": token}
+    )
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        path="/",
+        httponly=True,
+        secure=os.getenv("NODE_ENV") == "production",
+        samesite="lax",
+        max_age=SESSION_MAX_AGE,
+    )
+    return response
 
 
 app = FastAPI(title="Leo Voice Agent API")
@@ -271,6 +235,26 @@ async def auth_signout(request: Request):
         samesite="Lax",
     )
     return response
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(payload: EmailRequest):
+    """Create (or reuse) an account and sign the user in."""
+    email = payload.email.strip()
+    if "@" not in email:
+        return JSONResponse({"detail": "Enter a valid email address."}, status_code=400)
+    user = await asyncio.to_thread(repository.get_or_create_user, email)
+    return _email_signin_response(user)
+
+
+@app.post("/api/auth/login")
+async def auth_login(payload: EmailRequest):
+    """Sign in an existing account (created on first use)."""
+    email = payload.email.strip()
+    if "@" not in email:
+        return JSONResponse({"detail": "Enter a valid email address."}, status_code=400)
+    user = await asyncio.to_thread(repository.get_or_create_user, email)
+    return _email_signin_response(user)
 
 
 # ---------------------------------------------------------------------------
@@ -833,12 +817,22 @@ async def list_files(request: Request, directory: str = ""):
     for p in sorted(target.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
         rel = p.relative_to(root).as_posix()
         if p.is_dir():
+            directories.append(rel + "/")
+        else:
+            try:
+                size = p.stat().st_size
+            except OSError:
+                size = 0
+            files.append(f"{rel} ({size}B)")
+    return {"files": files, "directories": directories, "path": str(target)}
+
+
 # ---------------------------------------------------------------------------
 # File management endpoints
 
 
 @app.post("/api/files/mkdir")
-async def mkdir_file(request: Request, path: str = Body(..., description="Directory path to create")):
+async def mkdir_file(request: Request, path: str = Body(..., embed=True, description="Directory path to create")):
     """Create a new directory in the user's workspace."""
     workspace, _ = await _workspace_context(request.state.session)
     root = workspace.resolve()
@@ -853,7 +847,7 @@ async def mkdir_file(request: Request, path: str = Body(..., description="Direct
 
 
 @app.post("/api/files/rm")
-async def rm_file(request: Request, path: str = Body(..., description="File or directory path to remove")):
+async def rm_file(request: Request, path: str = Body(..., embed=True, description="File or directory path to remove")):
     """Remove a file or directory from the user's workspace."""
     workspace, _ = await _workspace_context(request.state.session)
     root = workspace.resolve()
@@ -871,14 +865,6 @@ async def rm_file(request: Request, path: str = Body(..., description="File or d
 
 
 # ---------------------------------------------------------------------------
-            directories.append(rel + "/")
-        else:
-            try:
-                size = p.stat().st_size
-            except OSError:
-                size = 0
-            files.append(f"{rel} ({size}B)")
-    return {"files": files, "directories": directories, "path": str(target)}
 
 
 @app.get("/api/history")
