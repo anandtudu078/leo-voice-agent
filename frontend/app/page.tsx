@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useAuthStore } from '@/app/auth'
 
 // react-router is not used; the landing redirects via window.location.href
@@ -32,7 +32,7 @@ export default function LandingPage() {
 
   function submitSignIn(e: React.FormEvent) {
     e.preventDefault()
-    signIn(email, '')
+    signIn(email)
   }
 
   return (
@@ -47,7 +47,7 @@ export default function LandingPage() {
               <rect x="9" y="2" width="6" height="13" rx="3" />
             </svg>
           </div>
-          <span className="font-bold text-lg tracking-tight">Project Workspace</span>
+          <span className="font-bold text-lg tracking-tight">Leo's voice workspace</span>
         </div>
 
         <nav className="flex items-center gap-3 text-sm flex-wrap">

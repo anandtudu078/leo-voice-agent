@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 
 import requests as http_requests
 from fastapi import FastAPI, Body, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.requests import Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -105,7 +106,7 @@ def write_session(email: str) -> str:
 
 class SignInRequest(BaseModel):
     email: str
-    password: str
+    password: str = ""
 
 
 class SignInResponse(JSONResponse):
@@ -138,6 +139,15 @@ app = FastAPI(title="Leo Voice Agent API")
 # ---------------------------------------------------------------------------
 
 
+
+def _get_session_cookie(request: Request) -> str | None:
+    """Read the signed session cookie from an incoming request."""
+    cookie = request.headers.get("cookie") or ""
+    for part in cookie.split(";"):
+        key, _, value = part.strip().partition("=")
+        if key == SESSION_COOKIE:
+            return value
+    return None
 @app.post("/api/auth/signin")
 async def auth_signin(req: SignInRequest):
     email = req.email.strip()
@@ -148,6 +158,28 @@ async def auth_signin(req: SignInRequest):
 
     token = write_session(email)
     return SignInResponse({"user": {"email": email}, "_session": token})
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """Return the currently signed-in user, or 401 if there is none."""
+    session = request.state.session
+    if not session or not session.get("email"):
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return {"user": {"email": session["email"]}}
+
+
+@app.post("/api/auth/signout")
+async def auth_signout(request: Request):
+    """Invalidate the signed session cookie on the client."""
+    response = JSONResponse({"detail": "Signed out."}, status_code=200)
+    response.delete_cookie(
+        key=SESSION_COOKIE,
+        path="/",
+        secure=os.getenv("NODE_ENV") == "production",
+        samesite="Lax",
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -205,13 +237,10 @@ async def echo(msg: str = Body(default="hello")):
 # browser. Set LEO_FRONTEND_ORIGIN to widen or narrow it.
 _leo_frontend_origins = os.getenv("LEO_FRONTEND_ORIGIN", "http://localhost:3000")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[_leo_frontend_origins],
-    allow_credentials=True,
-    allow_methods=["*", "POST", "GET", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
+# CORS middleware is disabled: the Next.js frontend proxies /api/* to
+# http://localhost:8000/api/*, so the browser never sends cross-origin
+# requests to the backend directly. Remove CORSMiddleware to avoid the known
+# Starlette bug where it crashes on 404 responses.
 
 # Initialize Google Gemini using the new google-genai SDK
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -497,7 +526,10 @@ async def websocket_talk(websocket: WebSocket):
 
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
-    return {"detail": "Not Found"}
+    import sys
+    print(f"[DBG] 404 handler called, type(exc)={type(exc).__name__}, status={exc.status_code}", file=sys.stderr)
+    resp = JSONResponse(status_code=404, content={"detail": "Not Found"})
+    return resp
 
 
 @app.get("/api/files")
