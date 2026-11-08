@@ -99,6 +99,64 @@ def write_session(email: str, user_id: int | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Auth endpoints
+
+
+class SignupRequest(BaseModel):
+    email: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(request: Request, payload: SignupRequest):
+    """Create a new user account and sign them in."""
+    user = await asyncio.to_thread(repository.get_or_create_user, payload.email)
+    token = write_session(payload.email, user["id"])
+    response = JSONResponse({"session": token, "user": user})
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=SESSION_MAX_AGE,
+        httponly=True,
+        path="/",
+        secure=False,
+        samesite="lax",
+    )
+    return response
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request, payload: LoginRequest):
+    """Sign in existing user."""
+    user = await asyncio.to_thread(repository.get_or_create_user, payload.email)
+    token = write_session(payload.email, user["id"])
+    response = JSONResponse({"session": token, "user": user})
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=SESSION_MAX_AGE,
+        httponly=True,
+        path="/",
+        secure=False,
+        samesite="lax",
+    )
+    return response
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """Return current user info from session."""
+    session = request.state.session
+    if not session or session.get("uid") is None:
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    user = await asyncio.to_thread(repository.get_user, session["uid"])
+    if user is None:
+        return JSONResponse(status_code=401, content={"detail": "User not found"})
+    return JSONResponse(content=user)
+# ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
 
@@ -775,6 +833,44 @@ async def list_files(request: Request, directory: str = ""):
     for p in sorted(target.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
         rel = p.relative_to(root).as_posix()
         if p.is_dir():
+# ---------------------------------------------------------------------------
+# File management endpoints
+
+
+@app.post("/api/files/mkdir")
+async def mkdir_file(request: Request, path: str = Body(..., description="Directory path to create")):
+    """Create a new directory in the user's workspace."""
+    workspace, _ = await _workspace_context(request.state.session)
+    root = workspace.resolve()
+    target = (root / path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return {"error": "Access denied"}
+    if not target.exists():
+        target.mkdir(parents=True, exist_ok=True)
+    return {"path": str(target), "created": True}
+
+
+@app.post("/api/files/rm")
+async def rm_file(request: Request, path: str = Body(..., description="File or directory path to remove")):
+    """Remove a file or directory from the user's workspace."""
+    workspace, _ = await _workspace_context(request.state.session)
+    root = workspace.resolve()
+    target = (root / path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return {"error": "Access denied"}
+    if target.is_dir():
+        import shutil
+        shutil.rmtree(target)
+    elif target.is_file():
+        target.unlink()
+    return {"path": str(target), "removed": True}
+
+
+# ---------------------------------------------------------------------------
             directories.append(rel + "/")
         else:
             try:
