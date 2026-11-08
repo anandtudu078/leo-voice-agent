@@ -71,7 +71,7 @@ export function ActivityBar({
   const [hovered, setHovered] = useState<string | null>(null)
 
   return (
-    <aside className="ide-activitybar hidden sm:flex flex-col h-[calc(100vh-56px)] fixed left-0 top-56 z-40">
+    <aside className="ide-activitybar w-12 shrink-0">
       {ACTIVITY_ITEMS.map((item) => {
         const isActive = active === item.id
         return (
@@ -80,10 +80,11 @@ export function ActivityBar({
             onClick={() => onSelect(item.id)}
             onMouseEnter={() => setHovered(item.id)}
             onMouseLeave={() => setHovered(null)}
-            className={`ide-activitybar-item relative group ${
-              isActive ? 'active' : hovered === item.id ? 'ide-activitybar-item:hover' : ''
-            } ${item.accent ? 'ide-activitybar-item' : ''}`}
+            className={`ide-activitybar-item ${isActive ? 'active' : ''} ${
+              item.accent ? 'text-[#8b83ff]' : ''
+            }`}
             aria-label={item.label}
+            aria-pressed={isActive}
             title={item.label}
           >
             {iconSvg(item.icon)}

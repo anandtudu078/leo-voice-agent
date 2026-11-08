@@ -1,9 +1,6 @@
 import { useState } from "react";
-import { Collection } from "@radix-ui/react-collection";
-import { Menu } from "@radix-ui/react-menu";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { LogIn, UserPlus } from "lucide-react";
 
 export default function SignupPage({

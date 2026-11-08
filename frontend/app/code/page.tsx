@@ -72,9 +72,6 @@ export default function CodeSpace() {
 
   return (
     <>
-      <VoiceStatusBar voiceStatus={voiceStatus} />
-      <PipelineVisualizer sttStatus={sttStatus} agentStatus={agentStatus} ttsStatus={ttsStatus} />
-
       <CodeSpaceShell
         user={user}
         signOut={signOutFn}
@@ -160,7 +157,10 @@ function CodeSpaceShell({
   const [editorMode, setEditorMode] = useState<'edit' | 'run'>('edit')
   const [lineCount, setLineCount] = useState(() => STARTER_CODE.split('\n').length)
   const [scrollEnd, setScrollEnd] = useState(false)
-  const [panelOpen, setPanelOpen] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(true)
+  const [activeView, setActiveView] = useState('explorer')
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [showSuggestion, setShowSuggestion] = useState(true)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
   const [activeTab, setActiveTab] = useState<string | null>('main.py')
@@ -195,6 +195,8 @@ function CodeSpaceShell({
   }
 
   const socketRef = useRef<WebSocket | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
   // ---- Voice status badge config ----
   const statusBadge = useMemo(() => {
@@ -362,6 +364,8 @@ function CodeSpaceShell({
     connect()
     return () => {
       socketRef.current?.close()
+      recorderRef.current?.stop()
+      streamRef.current?.getTracks().forEach((track) => track.stop())
     }
   }, [connect])
   // ---- File operations ----
@@ -463,13 +467,11 @@ function CodeSpaceShell({
 
   // ---- Voice recording ----
   const startRecording = async () => {
+    if (recording || !navigator.mediaDevices?.getUserMedia) return
     setLoading(true)
-    setLogs((prev) => [...prev, `> User spoke (listening...)`])
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      setVoiceStatus('listening')
-    } else {
-      setVoiceStatus('listening')
-    }
+    setLogs((prev) => [...prev, '> Listening… speak, then press Stop'])
+    setVoiceStatus('listening')
+    setSttStatus('listening')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream)
@@ -479,79 +481,149 @@ function CodeSpaceShell({
         if (event.data.size > 0) chunks.push(event.data)
       }
 
-      mediaRecorder.onstop = async () => {
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+        recorderRef.current = null
+        setRecording(false)
+        setLoading(false)
+
         if (chunks.length === 0) return
         const blob = new Blob(chunks, { type: 'audio/webm' })
         const reader = new FileReader()
         reader.onloadend = () => {
           const base64 = typeof reader.result === 'string' ? reader.result : ''
-          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+          if (base64 && socketRef.current?.readyState === WebSocket.OPEN) {
             socketRef.current.send(JSON.stringify({ type: 'audio', data: base64 }))
+          } else {
+            setLogs((prev) => [...prev, 'ERROR: voice socket is not connected'])
+            setVoiceStatus('disconnected')
           }
-          setLoading(false)
         }
         reader.readAsDataURL(blob)
       }
 
+      recorderRef.current = mediaRecorder
+      streamRef.current = stream
       mediaRecorder.start()
       setRecording(true)
     } catch (err) {
       console.error('Microphone access denied:', err)
       setLoading(false)
-      setLogs((prev) => [...prev, `ERROR: microphone access denied`])
+      setRecording(false)
+      setLogs((prev) => [...prev, 'ERROR: microphone access denied'])
+      setVoiceStatus('disconnected')
     }
   }
 
   const stopRecording = () => {
-    setRecording(false)
-    if (document.querySelector('audio')) document.querySelector('audio')!.remove()
+    const recorder = recorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop()
+    } else {
+      setRecording(false)
+      setLoading(false)
+    }
+  }
+
+  const toggleRecording = () => {
+    if (recording) stopRecording()
+    else void startRecording()
   }
 
   const fileCount = tree.filter((f) => f.kind === 'file').length
   const dirCount = tree.filter((f) => f.kind === 'dir').length
   return (
-    <main className="min-h-screen bg-[#0b0f19] text-white flex flex-col">
+    <main className="h-screen w-screen overflow-hidden flex flex-col bg-[#1e1e1e] text-white">
       {/* ===== Title bar ===== */}
-      <header className="ide-titlebar flex items-center justify-between px-3 py-1.5">
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded bg-[#635bff] flex items-center justify-center">
+      <header className="ide-titlebar flex items-center justify-between gap-3 px-3 h-10 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-5 h-5 rounded bg-[#635bff] flex items-center justify-center shrink-0">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 19v3" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
               <rect x="9" y="2" width="6" height="13" rx="3" />
             </svg>
           </div>
-          <span className="text-xs font-semibold tracking-tight">Leo Voice Workspace</span>
+          <span className="text-xs font-semibold tracking-tight truncate">Leo Voice Workspace</span>
+          <span className="hidden md:inline text-[11px] text-white/30 truncate max-w-56">
+            {activeFile || 'no file open'} · {fileCount} files{dirCount ? `, ${dirCount} folders` : ''}
+          </span>
         </div>
-        <div className="flex items-center gap-1">
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <PipelineVisualizer
+            sttStatus={sttStatus}
+            agentStatus={agentStatus}
+            ttsStatus={ttsStatus}
+          />
+          <VoiceStatus voiceStatus={voiceStatus} />
           <button
-            onClick={startRecording}
-            disabled={loading}
-            className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-xs text-white transition-colors disabled:opacity-40"
-            title="Record voice command"
+            onClick={toggleRecording}
+            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
+              recording
+                ? 'bg-red-500/20 text-red-300 border-red-500/40 hover:bg-red-500/30'
+                : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
+            }`}
+            title={recording ? 'Stop and send the command' : 'Record a voice command'}
           >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
             </svg>
+            {recording ? 'Stop & send' : 'Speak'}
           </button>
+          <button
+            onClick={() => setIsHandsFree((value) => !value)}
+            className={`hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
+              isHandsFree
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white'
+            }`}
+            title="Toggle hands-free listening"
+          >
+            Hands-free
+          </button>
+          {user.email && (
+            <span className="hidden lg:inline text-[11px] text-white/40 truncate max-w-40" title={user.email}>
+              {user.email}
+            </span>
+          )}
+          {signOut && (
+            <button
+              onClick={signOut}
+              className="text-xs px-2.5 py-1 rounded bg-white/5 text-white/60 border border-white/10 hover:bg-white/10 hover:text-white transition-colors"
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 
-      {/* ===== IDE body ===== */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Activity bar */}
-        <ActivityBar active="explorer" onSelect={() => {}} />
-
-        {/* Side bar */}
-        <SideBar
-          files={files}
-          activeFile={activeFile}
-          onOpenFile={openFile}
-          onCreateFile={() => createFile('untitled')}
+      {/* ===== Workbench ===== */}
+      <div className="flex flex-1 min-h-0 min-w-0">
+        <ActivityBar
+          active={activeView}
+          onSelect={(id) => {
+            setActiveView(id)
+            setSidebarOpen(true)
+          }}
         />
 
-        {/* Editor area */}
-        <div className="flex-1 flex flex-col min-h-0 border-l border-white/5">
+        {sidebarOpen && (
+          <SideBar
+            files={files}
+            activeFile={activeFile}
+            onOpenFile={openFile}
+            onCreateFile={() => createFile('untitled')}
+            view={activeView}
+            onToggle={() => setSidebarOpen(false)}
+            onSelectView={setActiveView}
+          />
+        )}
+
+        <section className="flex-1 flex flex-col min-w-0 min-h-0">
           <EditorArea
             tabs={openTabs}
             activeTab={activeTab}
@@ -566,89 +638,106 @@ function CodeSpaceShell({
             onTabClose={closeTab}
             disabled={editorMode === 'run'}
           />
-        </div>
 
-        {/* Panel (bottom) */}
-        <Panel
-          open={panelOpen}
-          onToggle={() => setPanelOpen(!panelOpen)}
-          activeTab={panelTab}
-          onTabChange={(id: string) => setPanelTab(id as 'voice' | 'terminal' | 'output' | 'problems')}
-        >
-          {panelTab === 'output' && (
-            <div className="h-full">
-              <div className="text-xs text-white/40 mb-1">Output / Console</div>
-              <div className="h-full overflow-y-auto font-mono text-xs space-y-1">
-                {logs.map((log, i) => (
-                  <div key={i} className="text-white/60 leading-relaxed whitespace-pre-wrap">
-                    {log}
+          <Panel
+            open={panelOpen}
+            onToggle={() => setPanelOpen((open) => !open)}
+            activeTab={panelTab}
+            onTabChange={(id: string) =>
+              setPanelTab(id as 'voice' | 'terminal' | 'output' | 'problems')
+            }
+          >
+            {panelTab === 'output' && (
+              <div className="flex flex-col h-full min-h-0 gap-1">
+                <div className="text-[11px] uppercase tracking-wider text-white/35 shrink-0">
+                  Output
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto font-mono text-xs space-y-0.5">
+                  {transcript && (
+                    <div className="text-[#8b83ff] whitespace-pre-wrap">&gt; {transcript}</div>
+                  )}
+                  {logs.map((log, i) => (
+                    <div key={i} className="text-white/60 leading-relaxed whitespace-pre-wrap">
+                      {log}
+                    </div>
+                  ))}
+                  {!logs.length && !transcript && (
+                    <div className="text-white/25">
+                      Press Speak, say a command, then press Stop &amp; send. Agent output and
+                      errors appear here.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {panelTab === 'terminal' && (
+              <div className="flex flex-col h-full min-h-0 font-mono text-xs">
+                <div className="text-white/40 shrink-0">Leo sandbox terminal</div>
+                <div className="flex-1 min-h-0 overflow-y-auto text-white/55 space-y-0.5 mt-1">
+                  {logs.map((log, i) => (
+                    <div key={i} className="whitespace-pre-wrap">
+                      {log}
+                    </div>
+                  ))}
+                  {!logs.length && (
+                    <div className="text-white/25">$ Run a file to see its output here.</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {panelTab === 'problems' && (
+              <div className="h-full font-mono text-xs">
+                <div className="text-white/40 mb-1">Problems</div>
+                <div className="text-white/25">No problems detected.</div>
+              </div>
+            )}
+
+            {panelTab === 'voice' && (
+              <div className="h-full space-y-3">
+                <div>
+                  <div className="text-[11px] text-white/35 mb-1 font-semibold uppercase tracking-wider">
+                    Voice state
                   </div>
-                ))}
-                {!logs.length && !transcript && (
-                  <div className="text-xs text-white/20">Speak a command. The agent builds or edits code for you.</div>
-                )}
+                  <VoiceStatus voiceStatus={voiceStatus} />
+                </div>
+                <div>
+                  <div className="text-[11px] text-white/35 mb-1 font-semibold uppercase tracking-wider">
+                    Pipeline
+                  </div>
+                  <PipelineVisualizer
+                    sttStatus={sttStatus}
+                    agentStatus={agentStatus}
+                    ttsStatus={ttsStatus}
+                  />
+                </div>
+                <div>
+                  <div className="text-[11px] text-white/35 mb-1 font-semibold uppercase tracking-wider">
+                    Last transcript
+                  </div>
+                  <div className="text-xs text-white/60 whitespace-pre-wrap">
+                    {transcript || 'Nothing heard yet.'}
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
-          {panelTab === 'terminal' && (
-            <div className="h-full bg-black/20 border-t border-white/5 p-3 font-mono text-xs">
-              <div className="text-white/40 mb-1">Terminal (placeholder)</div>
-              <div className="text-white/30">$ �</div>
-            </div>
-          )}
-          {panelTab === 'problems' && (
-            <div className="h-full p-3 font-mono text-xs">
-              <div className="text-white/40 mb-1">Problems</div>
-              <div className="text-white/30">No problems detected.</div>
-            </div>
-          )}
-          {panelTab === 'voice' && (
-            <div className="h-full p-3 space-y-3">
-              <div>
-                <div className="text-xs text-white/40 mb-1 font-semibold uppercase tracking-wider">Voice State</div>
-                <VoiceStatus voiceStatus={voiceStatus} />
-              </div>
-              <div>
-                <div className="text-xs text-white/40 mb-1 font-semibold uppercase tracking-wider">Pipeline</div>
-                <PipelineVisualizer
-                  sttStatus={sttStatus}
-                  agentStatus={agentStatus}
-                  ttsStatus={ttsStatus}
-                />
-              </div>
-              <div>
-                <div className="text-xs text-white/40 mb-1 font-semibold uppercase tracking-wider">Transcript</div>
-                <div className="text-xs text-white/60 whitespace-pre-wrap">{transcript || '�'}</div>
-              </div>
-            </div>
-          )}
-        </Panel>
-
-        {/* Status bar */}
-        <StatusBar
-          voiceStatus={voiceStatus}
-          branch="main"
-          encoding="UTF-8"
-          lineCol={`${lineCount} L, 1 C`}
-          onVoiceToggle={startRecording}
-        />
-      </div>
-      {/* ===== Floating widgets (voice status + pipeline) ===== */}
-      <div className="absolute top-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 z-30 pointer-events-none">
-        <VoiceStatusBar voiceStatus={voiceStatus} className="pointer-events-auto" />
-        <PipelineVisualizer
-          sttStatus={sttStatus}
-          agentStatus={agentStatus}
-          ttsStatus={ttsStatus}
-          className="pointer-events-auto"
-        />
+            )}
+          </Panel>
+        </section>
       </div>
 
-      {/* ===== Command palette ===== */}
+      {/* ===== Status bar ===== */}
+      <StatusBar
+        voiceStatus={voiceStatus}
+        branch="main"
+        encoding="UTF-8"
+        lineCol={`Ln ${lineCount}, Col 1`}
+        recording={recording}
+        onVoiceToggle={toggleRecording}
+      />
+
+      {showSuggestion && <ContextAwarePrompting onClose={() => setShowSuggestion(false)} />}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
-
-      {/* ===== Context-aware prompting ===== */}
-      <ContextAwarePrompting />
     </main>
   )
 }
@@ -775,7 +864,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   )
 }
 
-function ContextAwarePrompting() {
+function ContextAwarePrompting({ onClose }: { onClose: () => void }) {
   const [prompt, setPrompt] = useState('')
   const contexts = [
     {
@@ -793,22 +882,31 @@ function ContextAwarePrompting() {
   ]
 
   return (
-    <>
-      <div className="p-4 bg-[#1e1e1e] rounded border border-white/10 mb-4">
-        <p className="font-medium text-white mb-1">Suggestion:</p>
-        <p className="text-sm text-white/60 break-all">{prompt || contexts[0].message}</p>
+    <aside className="fixed bottom-10 right-3 z-20 w-80 max-w-[calc(100vw-1.5rem)] rounded-lg border border-white/10 bg-[#252526] shadow-2xl">
+      <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-white/40">
+          Suggestion
+        </span>
+        <button
+          onClick={onClose}
+          className="w-5 h-5 rounded flex items-center justify-center text-white/40 hover:bg-white/10 hover:text-white transition-colors"
+          aria-label="Dismiss suggestion"
+        >
+          ×
+        </button>
       </div>
-      <div className="grid grid-cols-2 gap-2 mt-4">
+      <p className="px-3 py-2 text-xs leading-relaxed text-white/60">{prompt || contexts[0].message}</p>
+      <div className="flex flex-wrap gap-1.5 border-t border-white/5 px-3 py-2">
         {contexts.map((c) => (
           <button
             key={c.trigger}
             onClick={() => setPrompt(c.message)}
-            className="p-2 bg-[#252526] rounded text-xs text-white/60 hover:bg-[#3c3c3c] hover:text-white cursor-pointer transition-colors"
+            className="px-2 py-1 rounded bg-white/5 text-[11px] text-white/60 hover:bg-white/10 hover:text-white transition-colors"
           >
             {c.trigger}
           </button>
         ))}
       </div>
-    </>
+    </aside>
   )
 }
