@@ -99,6 +99,64 @@ def write_session(email: str, user_id: int | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Auth endpoints
+
+
+class SignupRequest(BaseModel):
+    email: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(request: Request, payload: SignupRequest):
+    """Create a new user account and sign them in."""
+    user = await asyncio.to_thread(repository.get_or_create_user, payload.email)
+    token = write_session(payload.email, user["id"])
+    response = JSONResponse({"session": token, "user": user})
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=SESSION_MAX_AGE,
+        httponly=True,
+        path="/",
+        secure=False,
+        samesite="lax",
+    )
+    return response
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request, payload: LoginRequest):
+    """Sign in existing user."""
+    user = await asyncio.to_thread(repository.get_or_create_user, payload.email)
+    token = write_session(payload.email, user["id"])
+    response = JSONResponse({"session": token, "user": user})
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=SESSION_MAX_AGE,
+        httponly=True,
+        path="/",
+        secure=False,
+        samesite="lax",
+    )
+    return response
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """Return current user info from session."""
+    session = request.state.session
+    if not session or session.get("uid") is None:
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    user = await asyncio.to_thread(repository.get_user, session["uid"])
+    if user is None:
+        return JSONResponse(status_code=401, content={"detail": "User not found"})
+    return JSONResponse(content=user)
+# ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
 
