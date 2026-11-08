@@ -19,3 +19,6 @@ htmlcov/
 .pyinstaller/
 dist/
 build/
+
+# Voice IDE workspace
+session/

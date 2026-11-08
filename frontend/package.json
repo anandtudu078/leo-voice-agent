@@ -16,9 +16,13 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@radix-ui/react-collection": "^1.2.0",
+    "@radix-ui/react-menu": "^2.2.1",
+    "@radix-ui/react-primitive": "^2.2.0",
     "lucide-react": "^1.70.0",
     "next": "16.4.5",
     "react": "19.3.0",
+    "react-command-palette": "^0.22.2",
     "react-dom": "19.3.0",
     "react-simple-code-editor": "^0.14.1"
   },

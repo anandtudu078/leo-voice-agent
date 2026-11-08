@@ -5,13 +5,14 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   // Proxy backend routes (auth, and any other /api/* paths) to the FastAPI
-  // backend running on port 8000, so the frontend can reach the backend
-  // session endpoint without hard-coding the port in every client call.
+  // backend. In production on Vercel, set NEXT_PUBLIC_BACKEND_URL to your
+  // deployed backend (e.g. https://leo-backend.vercel.app). Locally it falls
+  // back to http://localhost:8000.
   async rewrites() {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:8000/api/:path*',
+        destination: `${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/api/:path*`,
       },
     ]
   },

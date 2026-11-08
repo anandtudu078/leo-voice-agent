@@ -65,18 +65,24 @@ class GnaniTTSClient:
         }
 
         headers = {"X-API-Key-ID": self.api_key}
-        response = requests.post(
-            self.base_url,
-            json=payload,
-            headers=headers,
-            timeout=60,
-        )
+        try:
+            response = requests.post(
+                self.base_url,
+                json=payload,
+                headers=headers,
+                timeout=60,
+            )
+        except requests.RequestException as exc:
+            raise GnaniTTSError(f"Gnani TTS request failed: {exc}") from exc
 
         if response.status_code != 200:
             detail = response.text or f"Gnani TTS returned HTTP {response.status_code}"
             raise GnaniTTSError(detail)
 
-        payload_body = response.json()
+        try:
+            payload_body = response.json()
+        except ValueError as exc:
+            raise GnaniTTSError("Gnani TTS returned a non-JSON response") from exc
         if not isinstance(payload_body, dict) or "audio" not in payload_body:
             detail = (
                 payload_body.get("error")

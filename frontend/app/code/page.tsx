@@ -3,52 +3,46 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useAuthStore } from '@/app/auth'
 import Editor from 'react-simple-code-editor'
+import { MenuItem } from '@radix-ui/react-menu'
+import { Command } from 'react-command-palette'
+
+import { ActivityBar } from './ActivityBar'
+import { SideBar } from './SideBar'
+import { EditorArea } from './EditorArea'
+import { Panel } from './Panel'
+import { StatusBar } from './StatusBar'
+import { VoiceStatus } from './VoiceStatus'
 
 // ---------------------------------------------------------------------------
-// Code-space IDE — clean, runnable voice workspace.
+// Code-space IDE � VS Code / PyCharm style shell, voice-powered.
+// ---------------------------------------------------------------------------
+// Layout blueprint:
+//
+//   TitleBar (top)
+//   +- ActivityBar (far-left rail)
+//   +- SideBar (collapsible explorer) | EditorArea (tabs + editor) | Panel (bottom)
+//   +- StatusBar (bottom)
 // ---------------------------------------------------------------------------
 
-/**
- * Code-space IDE.
- *
- * A dark workspace where the developer builds their project by voice.
- *
- *   Header:   “Code Space” + owner email + Live badge + Sign out
- *   Left col: file tree — open/create/delete files by voice
- *   Right col: syntax-highlighted code editor (file content) + run/log console
- *
- * Voice flow (two-way conversation):
- *   User speaks  → STT (Gnani) streams the transcript →
- *   agent reasons (Evon/Gemini) → replies with code/text + TTS audio =
- *   user hears the voice reply while the transcript and generated code are
- *   appended to the console and (for read/write run tools) surfaced in the
- *   file browser / editor.
- */
 export default function CodeSpace() {
-  // The backend now owns the session: it stores it in an HttpOnly cookie and
-  // exposes /api/auth/me + /api/auth/signout. This component reads the same
-  // session the backend knows about, so the IDE never relies on the
-  // client's localStorage mirror anymore.
-  const [user, setUser] = useState<{ email: string }>(() => ({ email: '' }))
-  // ---- Voice status state machine ----
-  //   idle          -> not connected / waiting for voice input
-  //   listening     -> user started recording (or agent says "listening")
-  //   processing    -> agent is generating a reply
-  //   disconnected  -> WebSocket lost / error
-  //   ready         -> WebSocket connected and idle
+  const [user, setUser] = useState<{ email: string }>({ email: '' })
+
+  // Voice status state machine
   const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'>('idle')
 
-  // ---- Pipeline stage states ----\n  // Track real-time status of STT, Agent, TTS pipeline stages\n  const [sttStatus, setSttStatus] = useState<'idle' | 'listening' | 'error'>('idle')\n  const [agentStatus, setAgentStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle')\n  const [ttsStatus, setTtsStatus] = useState<'idle' | 'speaking' | 'error'>('idle')\n\n  const [signOutFn, setSignOutFn] = useState<(() => void) | null>(() => null)
+  // Pipeline stage states
+  const [sttStatus, setSttStatus] = useState<'idle' | 'listening' | 'error'>('idle')
+  const [agentStatus, setAgentStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle')
+  const [ttsStatus, setTtsStatus] = useState<'idle' | 'speaking' | 'error'>('idle')
 
-  // The backend now owns the session: it stores it in an HttpOnly cookie and
-  // exposes /api/auth/me + /api/auth/signout. Sync the local email state
-  // with what the backend reports, falling back to an empty email when the
-  // user is not signed in.
+  const [signOutFn, setSignOutFn] = useState<(() => void) | null>(() => null)
+
+  // Sync session email with backend
   useEffect(() => {
     if (typeof window === 'undefined') return
-    (async () => {
+    ;(async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/auth/me', { cache: 'no-store' })
+        const res = await fetch('/api/auth/me', { cache: 'no-store' })
         let email = ''
         if (res.ok) {
           const data = await res.json().catch(() => null)
@@ -69,30 +63,65 @@ export default function CodeSpace() {
     })()
   }, [])
 
+  const status = useMemo(() => {
+    const map: Record<string, { label: string; css: string }> = {
+      idle: { label: 'Idle', css: 'bg-white/10 text-white/60' },
+      listening: { label: 'Listening', css: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+      processing: { label: 'Processing', css: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+      disconnected: { label: 'Disconnected', css: 'bg-red-500/20 text-red-400 border-red-500/30' },
+      ready: { label: 'Live', css: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+    }
+    return map[voiceStatus] || map.idle
+  }, [voiceStatus])
+
   return (
-    // ---- Voice Status Bar ---<
-  <VoiceStatusBar
-    voiceStatus={voiceStatus}
-    sttStatus={sttStatus}
-    agentStatus={agentStatus}
-    ttsStatus={ttsStatus}
-  />
-  // ---- Pipeline Visualizer ---<
-  <PipelineVisualizer
-    sttStatus={sttStatus}
-    agentStatus={agentStatus}
-    ttsStatus={ttsStatus}
-  />
+    <>
+      <VoiceStatusBar voiceStatus={voiceStatus} />
+      <PipelineVisualizer sttStatus={sttStatus} agentStatus={agentStatus} ttsStatus={ttsStatus} />
 
-  <CodeSpaceShell
-    user={user}
-    signOut={signOutFn}
-  />
-)
+      <CodeSpaceShell
+        user={user}
+        signOut={signOutFn}
+        voiceStatus={voiceStatus}
+        setVoiceStatus={setVoiceStatus}
+        sttStatus={sttStatus}
+        setSttStatus={setSttStatus}
+        agentStatus={agentStatus}
+        setAgentStatus={setAgentStatus}
+        ttsStatus={ttsStatus}
+        setTtsStatus={setTtsStatus}
+      />
+    </>
+  )
 }
+// ---------------------------------------------------------------------------
+// IDE shell: holds all workspace/editor/voice state and renders the chrome.
+// ---------------------------------------------------------------------------
 
-function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (() => void) | null }) {
-  // ---- State ----
+function CodeSpaceShell({
+  user,
+  signOut,
+  voiceStatus,
+  setVoiceStatus,
+  sttStatus,
+  setSttStatus,
+  agentStatus,
+  setAgentStatus,
+  ttsStatus,
+  setTtsStatus,
+}: {
+  user: { email: string }
+  signOut: (() => void) | null
+  voiceStatus: 'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'
+  setVoiceStatus: (status: 'idle' | 'listening' | 'processing' | 'disconnected' | 'ready') => void
+  sttStatus: 'idle' | 'listening' | 'error'
+  setSttStatus: (s: 'idle' | 'listening' | 'error') => void
+  agentStatus: 'idle' | 'processing' | 'done' | 'error'
+  setAgentStatus: (s: 'idle' | 'processing' | 'done' | 'error') => void
+  ttsStatus: 'idle' | 'speaking' | 'error'
+  setTtsStatus: (s: 'idle' | 'speaking' | 'error') => void
+}) {
+  // ---- Workspace state ----
   const [files, setFiles] = useState<{ path: string; kind: 'file' | 'dir'; name: string }[]>([])
   const [tree, setTree] = useState<{ path: string; kind: 'file' | 'dir'; name: string }[]>([])
   const [activeFile, setActiveFile] = useState<string | null>(null)
@@ -102,84 +131,94 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
   const [loading, setLoading] = useState(false)
   const [socket, setSocket] = useState<WebSocket | null>(null)
   const [connections, setConnections] = useState(0)
-  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'>('idle')
   const [recording, setRecording] = useState(false)
   const [viewMode, setViewMode] = useState<'all' | 'open'>('all')
   const [workspace, setWorkspace] = useState<string | null>(null)
   const [editorMode, setEditorMode] = useState<'edit' | 'run'>('edit')
   const [lineCount, setLineCount] = useState(0)
   const [scrollEnd, setScrollEnd] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
+  const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [openTabs, setOpenTabs] = useState<{ path: string; label: string }[]>([])
 
-  // ---- Voice status badges ----
-  const statusConfig = {
-    idle:      { label: 'Idle', css: 'bg-white/5 text-white/40' },
-    listening: { label: 'Listening', css: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-    processing: { label: 'Processing', css: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-    disconnected: { label: 'Disconnected', css: 'bg-red-500/20 text-red-400 border-red-500/30' },
-    ready:     { label: 'Live', css: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-  } as const
-  const status = statusConfig[voiceStatus]
+  // ---- Phase 3: hands-free & voice learning ----
+  const [isHandsFree, setIsHandsFree] = useState(false)
+  const [lastActiveFile, setLastActiveFile] = useState<string | null>(null)
+  const [voiceHistoryMemory, setVoiceHistoryMemory] = useState<Array<{ transcript: string; timestamp: number }>>([])
+  const [focusedFile, setFocusedFile] = useState<string | null>(null)
+  const [recentFiles, setRecentFiles] = useState<Array<{ path: string; openedAt: number }>>([])
+  const [executionResults, setExecutionResults] = useState<
+    Array<{
+      id: string
+      type: 'test' | 'output' | 'error' | 'tts'
+      content: string
+      timestamp: number
+      passed?: boolean
+      executable?: boolean
+    }>
+  >([])
+  const [commandFrequency, setCommandFrequency] = useState<Map<string, number>>(new Map())
+
+  const trackCommand = (command: string) => {
+    setCommandFrequency((prev) => {
+      const next = new Map(prev)
+      next.set(command, (next.get(command) || 0) + 1)
+      return next
+    })
+  }
 
   const socketRef = useRef<WebSocket | null>(null)
-  socketRef.current = socket
 
-  // ---- File listing: when a file is active, fetch its content from the
-  // backend's read_file tool over the voice WebSocket so the IDE reflects
-  // the agent's view of the workspace. ----
-  useEffect(() => {
-    if (!activeFile || !workspace) return
-    if (socketRef.current?.readyState !== WebSocket.OPEN) return
-    const msg = { type: 'read_file', path: activeFile }
-    socketRef.current.send(JSON.stringify(msg))
-  }, [activeFile, workspace])
+  // ---- Voice status badge config ----
+  const statusBadge = useMemo(() => {
+    const map: Record<string, { label: string; css: string }> = {
+      idle: { label: 'Idle', css: 'bg-white/10 text-white/60 border-white/10' },
+      listening: { label: 'Listening', css: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+      processing: { label: 'Processing', css: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+      disconnected: { label: 'Disconnected', css: 'bg-red-500/20 text-red-400 border-red-500/30' },
+      ready: { label: 'Live', css: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+    }
+    return map[voiceStatus] || map.idle
+  }, [voiceStatus])
 
   // ---- WebSocket connection ----
   const connect = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    const wsUrl = `${protocol}//${host}/ws/process-voice`
+    if (socketRef.current?.readyState === WebSocket.OPEN) return
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+    const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws`
     const ws = new WebSocket(wsUrl)
-    setSocket(ws)
     socketRef.current = ws
+    setSocket(ws)
+    setConnections((c) => c + 1)
 
-    ws.onopen = () => {
-      // WebSocket connected — back to idle/ready state
-      setVoiceStatus('ready')
-      ws.send(JSON.stringify({ language_code: 'en-IN' }))
-    }
-
+    ws.onopen = () => setVoiceStatus('ready')
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data) as {
-          type: string
-          transcript?: string
-          code?: string
-          logs?: string[]
-          speech?: string
-          error?: string
-          message?: string
-        }
-
+        const msg = JSON.parse(event.data)
         switch (msg.type) {
-          case 'turn-started':
-            // Agent started thinking — transition to processing
-            setVoiceStatus('processing')
-            break
-          case 'waiting':
-            // Agent says "Thinking..." — keep processing
-            setVoiceStatus('processing')
-            break
-          case 'listening':
-            // Agent said it's listening (e.g. after finishing a reply)
-            setVoiceStatus('listening')
-            break
-          case 'closed':
-            // Agent closed the voice session
-            setVoiceStatus('ready')
+          case 'status':
+            switch (msg.status) {
+              case 'connected':
+                setVoiceStatus('ready')
+                break
+              case 'processing':
+                setVoiceStatus('processing')
+                setAgentStatus('processing')
+                break
+              case 'listening':
+                setVoiceStatus('listening')
+                setSttStatus('listening')
+                break
+              case 'closed':
+                setVoiceStatus('ready')
+                break
+            }
             break
           case 'transcript':
             setTranscript(msg.transcript || '')
             setVoiceStatus('ready')
+            setSttStatus('idle')
             break
           case 'code':
             setLogs((prev) => [...prev, `{ Agent: ${msg.code || ''} }`])
@@ -187,6 +226,7 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
               setLogs((prev) => [...prev, `{ Agent read: ${msg.code} }`])
             }
             setVoiceStatus('ready')
+            setAgentStatus('done')
             break
           case 'logs':
             setLogs((prev) => [...prev, ...(msg.logs || [])])
@@ -205,12 +245,12 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
                 audio.play().catch(() => {})
                 URL.revokeObjectURL(url)
               }
-              // Log the agent's spoken reply using the pending transcript
               setLogs((prev) => [...prev, `{ Agent says: ${transcript || '<reply>'} }`])
             } catch {
               // ignore audio decode errors
             }
             setVoiceStatus('ready')
+            setTtsStatus('idle')
             break
           case 'error':
             setLogs((prev) => [...prev, `ERROR: ${msg.error || ''}`])
@@ -231,17 +271,35 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
       setConnections((c) => c - 1)
       setVoiceStatus('disconnected')
     }
-  }, [transcript])
+  }, [transcript, voiceStatus, setVoiceStatus, setSttStatus, setAgentStatus, setTtsStatus])
 
-  // ---- File operations (send a command over the WebSocket) ----
+  useEffect(() => {
+    connect()
+    return () => {
+      socketRef.current?.close()
+    }
+  }, [connect])
+  // ---- File operations ----
   const openFile = (path: string) => {
     setActiveFile(path)
+    setActiveTab(path)
+    if (!openTabs.some((t) => t.path === path)) {
+      setOpenTabs((prev) => [...prev, { path, label: path.split('/').pop() || path }])
+    }
+    setRecentFiles((prev) => {
+      const next = prev.filter((f) => f.path !== path)
+      return [{ path, openedAt: Date.now() }, ...next].slice(0, 10)
+    })
     const msg = { type: 'read_file', path }
     socketRef.current?.send(JSON.stringify(msg))
   }
 
   const createFile = (name: string) => {
     setActiveFile(name)
+    setActiveTab(name)
+    if (!openTabs.some((t) => t.path === name)) {
+      setOpenTabs((prev) => [...prev, { path: name, label: name.split('/').pop() || name }])
+    }
     const msg = { type: 'create_file', path: name, code: '' }
     socketRef.current?.send(JSON.stringify(msg))
     setLogs((prev) => [...prev, `> Created ${name}`])
@@ -251,7 +309,10 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
     const msg = { type: 'delete_file', path }
     socketRef.current?.send(JSON.stringify(msg))
     setTree((prev) => prev.filter((f) => f.path !== path))
+    setFiles((prev) => prev.filter((f) => f.path !== path))
+    setOpenTabs((prev) => prev.filter((t) => t.path !== path))
     if (activeFile === path) setActiveFile(null)
+    if (activeTab === path) setActiveTab(null)
   }
 
   const saveFile = (code: string) => {
@@ -262,17 +323,36 @@ function CodeSpaceShell({ user, signOut }: { user: { email: string }; signOut: (
   }
 
   const runFile = (path: string) => {
-    const msg = { type: 'run_script', path }
-    socketRef.current?.send(JSON.stringify(msg))
-    setLogs((prev) => [...prev, `> Running ${path}`])
+    if (!content) return
+    const scriptPath = path || 'snippet.py'
+    socketRef.current?.send(JSON.stringify({
+      type: 'write_file',
+      path: scriptPath,
+      code: content,
+    }))
+    setLogs((prev) => [...prev, `> Saved ${scriptPath}`])
+    socketRef.current?.send(JSON.stringify({
+      type: 'run_script',
+      path: scriptPath,
+    }))
+    setLogs((prev) => [...prev, `> Running ${scriptPath}`])
     setVoiceStatus('listening')
   }
 
-  // ---- Workspace bootstrap: create a working directory with a starter file ----
-  const bootstrapWorkspace = useCallback(() => {
-    const starter = `# Leo voice agent — build your project by voice
+  const closeTab = (path: string) => {
+    setOpenTabs((prev) => prev.filter((t) => t.path !== path))
+    if (activeTab === path) {
+      const remaining = openTabs.filter((t) => t.path !== path)
+      setActiveTab(remaining.length > 0 ? remaining[0].path : null)
+      setActiveFile(remaining.length > 0 ? remaining[0].path : null)
+    }
+  }
 
-# Speak: “open main.py”, “write a hello function”, “run main.py”
+  // ---- Workspace bootstrap ----
+  const bootstrapWorkspace = useCallback(() => {
+    const starter = `# Leo voice agent � build your project by voice
+
+# Speak: �open main.py�, �write a hello function�, �run main.py�
 
 def hello(name=""):
     return f"Hello, {name or 'world'}!"
@@ -288,17 +368,22 @@ if __name__ == "__main__":
       { path: 'README.md', kind: 'file', name: 'README.md' },
       { path: 'sandbox.py', kind: 'file', name: 'sandbox.py' },
     ])
-    setFiles([...tree])
-    // Open main.py and seed its content
+    setFiles([
+      { path: 'main.py', kind: 'file', name: 'main.py' },
+      { path: 'app.py', kind: 'file', name: 'app.py' },
+      { path: 'README.md', kind: 'file', name: 'README.md' },
+      { path: 'sandbox.py', kind: 'file', name: 'sandbox.py' },
+    ])
     if (!activeFile) setActiveFile('main.py')
+    if (!activeTab) setActiveTab('main.py')
+    setOpenTabs([{ path: 'main.py', label: 'main.py' }])
     setContent(starter)
     setLineCount(starter.split('\n').length)
-  }, [activeFile])
+  }, [activeFile, activeTab])
 
   useEffect(() => {
     bootstrapWorkspace()
   }, [bootstrapWorkspace])
-
   // ---- Keyboard shortcuts ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -311,20 +396,22 @@ if __name__ == "__main__":
         e.preventDefault()
         if (activeFile && editorMode === 'edit') runFile(activeFile)
       }
+      if (mod && e.key === 'j') {
+        e.preventDefault()
+        setPanelOpen(!panelOpen)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activeFile, content, editorMode])
+  }, [activeFile, content, editorMode, panelOpen])
 
   // ---- Voice recording ----
   const startRecording = async () => {
     setLoading(true)
     setLogs((prev) => [...prev, `> User spoke (listening...)`])
-    // If the WebSocket is already connected, set status to listening
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       setVoiceStatus('listening')
     } else {
-      // Just initializing — the agent will set the status when it connects
       setVoiceStatus('listening')
     }
     try {
@@ -366,333 +453,304 @@ if __name__ == "__main__":
 
   const fileCount = tree.filter((f) => f.kind === 'file').length
   const dirCount = tree.filter((f) => f.kind === 'dir').length
-
   return (
     <main className="min-h-screen bg-[#0b0f19] text-white flex flex-col">
-      {/* ===== Header ===== */}
-      <header className="flex items-center justify-between border-b border-white/5 pb-4 px-4 md:px-6">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#635bff] flex items-center justify-center">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {/* ===== Title bar ===== */}
+      <header className="ide-titlebar flex items-center justify-between px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 rounded bg-[#635bff] flex items-center justify-center">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 19v3" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
               <rect x="9" y="2" width="6" height="13" rx="3" />
             </svg>
           </div>
-          <div>
-            <h1 className="text-lg font-bold leading-tight">Code Space</h1>
-            <p className="text-xs text-white/50">
-              {user.email ? `${user.email} — workspace root` : 'workspace root'}
-            </p>
-          </div>
+          <span className="text-xs font-semibold tracking-tight">Leo Voice Workspace</span>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Voice status badge */}
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border ${status.css}`}>
-            <span className="w-1.5 h-1.5 rounded-full bg-current" />
-            <span className="text-xs font-medium">{status.label}</span>
-          </div>
-          {signOut && (
-            <button
-              onClick={signOut}
-              className="px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/80 transition-colors"
-            >
-              Sign out
-            </button>
-          )}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={startRecording}
+            disabled={loading}
+            className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-xs text-white transition-colors disabled:opacity-40"
+            title="Record voice command"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+            </svg>
+          </button>
         </div>
       </header>
 
-      {/* ===== Main IDE ===== */}
-      <div className="flex-1 flex flex-col gap-3 p-4 md:p-6 overflow-y-auto">
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className={`text-xs px-2 py-1 rounded ${editorMode === 'edit' ? 'bg-[#635bff] text-white' : 'bg-white/5 text-white/60'}`}>
-              {editorMode === 'edit' ? 'EDIT' : 'RUN'}
-            </span>
-            <span className="text-xs text-white/40">
-              {activeFile ? `— ${activeFile}` : '— no file'}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-white/40">{fileCount} files, {dirCount} dirs</span>
-            <div className="flex items-center gap-1 ml-2">
-              <button
-                onClick={() => setViewMode('all')}
-                className={`text-xs px-2 py-1 rounded ${viewMode === 'all' ? 'bg-white/10 text-white' : 'text-white/40 hover:bg-white/5'}`}
-              >
-                All files
-              </button>
-              <button
-                onClick={() => setViewMode('open')}
-                className={`text-xs px-2 py-1 rounded ${viewMode === 'open' ? 'bg-white/10 text-white' : 'text-white/40 hover:bg-white/5'}`}
-              >
-                Open files
-              </button>
-            </div>
-            <div className="flex items-center gap-1 ml-2">
-              <button
-                onClick={() => setEditorMode('edit')}
-                className={`text-xs px-2 py-1 rounded ${editorMode === 'edit' ? 'bg-[#635bff] text-white' : 'text-white/40 hover:bg-white/5'}`}
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => setEditorMode('run')}
-                className={`text-xs px-2 py-1 rounded ${editorMode === 'run' ? 'bg-[#635bff] text-white' : 'text-white/40 hover:bg-white/5'}`}
-              >
-                Run
-              </button>
-            </div>
-          </div>
+      {/* ===== IDE body ===== */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Activity bar */}
+        <ActivityBar active="explorer" onSelect={() => {}} />
+
+        {/* Side bar */}
+        <SideBar
+          files={files}
+          activeFile={activeFile}
+          onOpenFile={openFile}
+          onCreateFile={() => createFile('untitled')}
+        />
+
+        {/* Editor area */}
+        <div className="flex-1 flex flex-col min-h-0 border-l border-white/5">
+          <EditorArea
+            tabs={openTabs}
+            activeTab={activeTab}
+            content={content}
+            onContentChange={(code) => {
+              setContent(code)
+              setLineCount(code.split('\n').length)
+            }}
+            onSave={() => saveFile(content)}
+            onRun={() => runFile(activeFile || '')}
+            onTabClick={openFile}
+            onTabClose={closeTab}
+            disabled={editorMode === 'run'}
+          />
         </div>
 
-        {/* File browser + code editor console */}
-        <div className="flex-1 flex flex-col gap-3 overflow-y-auto">
-          {/* File browser */}
-          <div className="flex gap-3 overflow-x-auto">
-            <div className="w-44 flex-shrink-0 border border-white/5 rounded-lg bg-white/[0.03] p-2 flex flex-col gap-1 overflow-auto">
-              <div className="flex items-center justify-between px-2 py-1">
-                <span className="text-xs text-white/40 font-mono">Files</span>
-                <button
-                  className="text-xs text-[#635bff] hover:text-white"
-                  onClick={() => prompt('Enter file name', 'new.py')?.trim() && createFile(prompt('Enter file name', 'new.py')!.trim())}
-                >
-                  New file
-                </button>
-              </div>
-              {tree
-                .filter((f) => viewMode === 'all' || (viewMode === 'open' && f.path === activeFile))
-                .map((f) => (
-                  <div
-                    key={f.path}
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${activeFile === f.path ? 'bg-[#635bff] text-white' : 'text-white/70 hover:bg-white/5'}`}
-                    onClick={() => openFile(f.path)}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      {f.kind === 'file' ? <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /> : <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />}
-                    </svg>
-                    {f.name}
+        {/* Panel (bottom) */}
+        <Panel
+          open={panelOpen}
+          onToggle={() => setPanelOpen(!panelOpen)}
+          activeTab={panelTab}
+          onTabChange={(id: string) => setPanelTab(id as 'voice' | 'terminal' | 'output' | 'problems')}
+        >
+          {panelTab === 'output' && (
+            <div className="h-full">
+              <div className="text-xs text-white/40 mb-1">Output / Console</div>
+              <div className="h-full overflow-y-auto font-mono text-xs space-y-1">
+                {logs.map((log, i) => (
+                  <div key={i} className="text-white/60 leading-relaxed whitespace-pre-wrap">
+                    {log}
                   </div>
                 ))}
-              {tree.filter((f) => f.kind === 'dir').map((f) => (
-                <div
-                  key={f.path}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs cursor-pointer transition-colors ${activeFile === f.path ? 'bg-[#635bff] text-white' : 'text-white/70 hover:bg-white/5'}`}
-                  onClick={() => openFile(f.path)}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                  </svg>
-                  <span className="truncate">{f.name}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Code editor + output console */}
-            <div className="flex-1 flex flex-col gap-3 overflow-y-auto">
-              {/* Editor */}
-              <div className="flex-1 flex flex-col border border-white/5 rounded-lg bg-[#0b0f19] overflow-hidden">
-                <div className="flex items-center justify-between px-3 md:px-4 py-2 border-b border-white/5">
-                  <div className="flex items-center gap-2">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    </svg>
-                    <span className="text-xs text-white/40 font-mono truncate">{activeFile || 'untitled'}</span>
-                    <span className="text-xs text-white/30">{lineCount} lines</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => saveFile(content)}
-                      disabled={!activeFile || loading}
-                      className="text-xs px-2 py-1 rounded bg-[#635bff] text-white disabled:opacity-40"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => runFile(activeFile || '')}
-                      disabled={!activeFile || loading}
-                      className="text-xs px-2 py-1 rounded bg-[#635bff] text-white disabled:opacity-40"
-                    >
-                      Run
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-auto bg-[#0b0f19] relative">
-                  <Editor
-                    value={content}
-                    onValueChange={(code) => {
-                      setContent(code)
-                      setLineCount(code.split('\n').length)
-                    }}
-                    highlight={(code) => <code className="language-javascript">{code}</code>}
-                    className="react-simple-code-editor"
-                    style={{
-                      fontFamily: 'ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace',
-                      fontSize: 13,
-                      color: '#a6e3a1',
-                      minHeight: '240px',
-                      outline: 'none',
-                      padding: '12px 14px',
-                    }}
-                    disabled={false}
-                  />
-                  {/* line numbers */}
-                  <div
-                    className="absolute left-0 top-0 bottom-0 w-10 bg-[#0b0f19] border-r border-white/5 text-right pr-3 text-xs text-white/30 font-mono select-none"
-                    style={{ overflow: 'auto' }}
-                  >
-                    {content.split('\n').map((_, i) => (
-                      <div key={i}>{i + 1}</div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Output / voice console */}
-              <div className="border border-white/5 rounded-lg bg-[#0b0f19] overflow-auto flex-1 flex flex-col min-h-0">
-                <div className="flex items-center justify-between px-3 md:px-4 py-2 border-b border-white/5">
-                  <span className="text-xs text-white/40 font-mono">Console</span>
-                  <span className="text-xs text-white/30 flex items-center gap-2">
-                    {transcript || 'Speak a command.'}
-                    {logs.length > 0 && (
-                      <button
-                        onClick={() => setLogs([])}
-                        className="text-xs text-white/30 hover:text-white/50"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </span>
-                </div>
-                <div className="p-3 md:p-4 overflow-auto">
-                  {logs.map((log, i) => (
-                    <div key={i} className="text-xs text-white/60 leading-relaxed whitespace-pre-wrap">
-                      {log}
-                    </div>
-                  ))}
-                  {!logs.length && !transcript && (
-                    <div className="text-xs text-white/20">
-                      Speak a command. The agent builds or edits code for you.
-                    </div>
-                  )}
-                </div>
+                {!logs.length && !transcript && (
+                  <div className="text-xs text-white/20">Speak a command. The agent builds or edits code for you.</div>
+                )}
               </div>
             </div>
-          </div>
-        </div>
+          )}
+          {panelTab === 'terminal' && (
+            <div className="h-full bg-black/20 border-t border-white/5 p-3 font-mono text-xs">
+              <div className="text-white/40 mb-1">Terminal (placeholder)</div>
+              <div className="text-white/30">$ �</div>
+            </div>
+          )}
+          {panelTab === 'problems' && (
+            <div className="h-full p-3 font-mono text-xs">
+              <div className="text-white/40 mb-1">Problems</div>
+              <div className="text-white/30">No problems detected.</div>
+            </div>
+          )}
+          {panelTab === 'voice' && (
+            <div className="h-full p-3 space-y-3">
+              <div>
+                <div className="text-xs text-white/40 mb-1 font-semibold uppercase tracking-wider">Voice State</div>
+                <VoiceStatus voiceStatus={voiceStatus} />
+              </div>
+              <div>
+                <div className="text-xs text-white/40 mb-1 font-semibold uppercase tracking-wider">Pipeline</div>
+                <PipelineVisualizer
+                  sttStatus={sttStatus}
+                  agentStatus={agentStatus}
+                  ttsStatus={ttsStatus}
+                />
+              </div>
+              <div>
+                <div className="text-xs text-white/40 mb-1 font-semibold uppercase tracking-wider">Transcript</div>
+                <div className="text-xs text-white/60 whitespace-pre-wrap">{transcript || '�'}</div>
+              </div>
+            </div>
+          )}
+        </Panel>
+
+        {/* Status bar */}
+        <StatusBar
+          voiceStatus={voiceStatus}
+          branch="main"
+          encoding="UTF-8"
+          lineCol={`${lineCount} L, 1 C`}
+          onVoiceToggle={startRecording}
+        />
       </div>
+      {/* ===== Floating widgets (voice status + pipeline) ===== */}
+      <div className="absolute top-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 z-30 pointer-events-none">
+        <VoiceStatusBar voiceStatus={voiceStatus} className="pointer-events-auto" />
+        <PipelineVisualizer
+          sttStatus={sttStatus}
+          agentStatus={agentStatus}
+          ttsStatus={ttsStatus}
+          className="pointer-events-auto"
+        />
+      </div>
+
+      {/* ===== Command palette ===== */}
+      <CommandPalette />
+
+      {/* ===== Context-aware prompting ===== */}
+      <ContextAwarePrompting />
     </main>
   )
 }
-const VoiceStatusBar = () => <div className="p-2 bg-gray-900 text-white rounded mb-2 flex items-center gap-2"><svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 002-2H9.5l-.964-3.03a2 2 0 00-1.664-1.834H5.25a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg><span>Listening</span></div>
-const PipelineVisualizer = () => <div className="flex items-center gap-2 mb-2"><div className="w-2 h-2 bg-red-500 rounded-full animate-bounce"/><div className="w-2 h-2 bg-yellow-500 rounded-full animate-bounce" style={{animationDelay: "0.2s"}}/><div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{animationDelay: "0.4s"}}/></div></div>
-const CommandHints = () => <div className="p-2 bg-gray-900 text-xs text-gray-300 rounded mb-2 uppercase"><p className="text-xs mb-1 gray-400">Shortcuts</p><div className="flex gap-1"><kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Cmd+K</kbd><kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Esc</kbd><kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Ctrl+Enter</kbd><kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Ctrl+Shift+P</kbd></div></div>
-const VoiceCommandHistory = () => <div className="h-80 border rounded p-4 bg-gray-900 overflow-y-auto"><h4 className="font-bold mb-4">Command History</h4><div className="space-y-3">{/* transcripts, code, results, TTS players rendered dynamically */}</div></div>
-const CommandPalette = () => { let [q, setQ] = React.useState(""); const cmds = [{"key":"new-project","label":"New Project","description":"Start a fresh project"},{"key":"open-file","label":"Open File","description":"Open a file from disk"},{"key":"refactor","label":"Refactor Code","description":"Auto-refactor selected code"},{"key":"debug","label":"Debug","description":"Run debugger on current file"},{"key":"terminal","label":"New Terminal","description":"Open terminal at project root"}]; return <div className="fixed inset-0 bg-black/60 backdrop-blur z-50 flex items-center justify-center"><div className="relative bg-gray-900 rounded-2xl p-8 w-80 max-w-full animate-pop"><button onClick={()=>setQ("")} className="absolute top-4 right-4 w-8 h-8 rounded bg-gray-700 text-gray-300 flex items-center justify-center">×</button><h3 className="text-lg mb-6 text-center">Command Palette</h3><input onChange={(e)=>setQ(e.target.value)} value={q} className="w-full bg-gray-800 border rounded p-2 pl-12 focus:bg-gray-700 focus:border-gray-400 focus:text-white placeholder-gray-400 transition-colors" placeholder="Type a command..."/><div className="mt-6 space-y-3 max-h-80 overflow-y-auto">{cmds.filter(c=>c.label.toLowerCase().includes(q.toLowerCase())).map((c,i)=><div key={i} className="flex items-center gap-3 p-3 rounded cursor-hover:bg-gray-800"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"/><div><p className="font-medium text-gray-200">{c.label}</p><p className="text-xs text-gray-400">{c.description}</p></div></div>))}</div></div></div>
-const ContextAwarePrompting = () => { let [p, setP] = React.useState(""); const ctxs = [{"trigger":"file-viewed","message":"I see you're viewing a React component. Would you like me to help extract props or generate unit tests?"},{"trigger":"recent-actions","message":"You just saved a file. Would you like to commit changes or preview the updated component?"},{"trigger":"selection","message":"Code is selected. I can help refactor, extract function, or generate documentation for this block."}]; return <div className="p-4 bg-gray-900 rounded mb-4"><p className="font-medium text-gray-200 mb-1">Suggestion:</p><p className="text-sm text-gray-300 break-all">{p}</p></div><div className="grid grid-cols-2 gap-2 mt-4">{ctxs.map((c,i)=><button key={i} className="p-2 bg-gray-800 rounded text-xs hover:bg-gray-700 cursor-pointer">{c.trigger}</button>))}</div>
-/// Phase 3: Hands‑Free & Voice Learning Features
 
-const [isHandsFree, setIsHandsFree] = useState(false)
+// ---------------------------------------------------------------------------
+// Voice status indicators (kept from original, restyled for IDE)
+// ---------------------------------------------------------------------------
 
-const [lastActiveFile, setLastActiveFile] = useState<string | null>(null)
+const VOICE_STATUS_LABELS = {
+  idle: 'Idle',
+  listening: 'Listening',
+  processing: 'Processing',
+  disconnected: 'Disconnected',
+  ready: 'Live',
+} as const
 
-const [voiceHistoryMemory, setVoiceHistoryMemory] = useState<Array<{ transcript: string; timestamp: number }>>([])
-
-const [focusedFile, setFocusedFile] = useState<string | null>(null)
-
-const [recentFiles, setRecentFiles] = useState<Array<{ path: string; openedAt: number }>>([])
-
-const [executionResults, setExecutionResults] = useState<Array<{
-  id: string
-  type: "test" | "output" | "error" | "tts"
-  content: string
-  timestamp: number
-  passed?: boolean
-  executable?: boolean
-}>>([])
-
-const [commandFrequency, setCommandFrequency] = useState<Map<string, number>>(new Map())
-
-const trackCommand = (command: string) => {
-  setCommandFrequency(prev => {
-    const freq = new Map(prev)
-    freq.set(command, (freq.get(command) ?? 0) + 1)
-    return freq
-  })
+function VoiceStatusBar({
+  voiceStatus,
+  className,
+}: { voiceStatus: keyof typeof VOICE_STATUS_LABELS; className?: string }) {
+  return (
+    <div className={`p-2 bg-gray-900 text-white rounded mb-2 flex items-center gap-2 ${className || ''}`}>
+      <svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 002-2H9.5l-.964-3.03a2 2 0 00-1.664-1.834H5.25a2 2 0 00-2 2v6a2 2 0 002 2z"
+        />
+      </svg>
+      <span>{VOICE_STATUS_LABELS[voiceStatus]}</span>
+    </div>
+  )
 }
 
-const sortedCommands = React.useMemo(() => {
-  const entries: [string, number][] = [...commandFrequency.entries()]
-  entries.sort((a, b) => b[1] - a[1])
-  return entries.reduce((acc, [key,]) => {
-    acc.push(key)
-    return acc
-  }, [] as string[])
-}, [commandFrequency])
+function PipelineVisualizer({
+  sttStatus,
+  agentStatus,
+  ttsStatus,
+  className,
+}: {
+  sttStatus: 'idle' | 'listening' | 'error'
+  agentStatus: 'idle' | 'processing' | 'done' | 'error'
+  ttsStatus: 'idle' | 'speaking' | 'error'
+  className?: string
+}) {
+  const stages = [
+    { label: 'STT', active: sttStatus === 'listening', color: 'bg-blue-500' },
+    { label: 'Agent', active: agentStatus === 'processing', color: 'bg-amber-500' },
+    { label: 'TTS', active: ttsStatus === 'speaking', color: 'bg-emerald-500' },
+  ]
 
-// ---- Phase 4: Advanced Features ----
-// Voice collaboration & multi-user support
-const [collaborationMode, setCollaborationMode] = useState(false)
-const [sharedCursor, setSharedCursor] = useState({ x: 0, y: 0, userId: '' })
-const [collaborators, setCollaborators] = useState<Array<{ userId: string; name: string; connectedAt: number }>>([])
-
-// AI-assisted coding enhancements
-const [aiSuggestions, setAISuggestions] = useState<Array<{
-  id: string
-  type: 'refactor' | 'test' | 'doc' | 'fix'
-  title: string
-  description: string
-  code?: string
-  confidence: number
-}>>([])
-const [isGeneratingAI, setIsGeneratingAI] = useState(false)
-
-// Voice biometrics and user tracking
-const [userId, setUserId] = useState(generateUserId())
-const [voicePrint, setVoicePrint] = useState<Array<number>>([])
-
-// Docker and deployment state
-const [isBuildingDocker, setIsBuildingDocker] = useState(false)
-const [dockerLog, setDockerLog] = useState<string>('')
-
-// Generate a unique user ID
-function generateUserId(): string {
-  return 'user_' + Math.random().toString(36).substr(2, 9)
+  return (
+    <div className={`flex items-center gap-3 px-1 ${className || ''}`}>
+      {stages.map((stage) => (
+        <div key={stage.label} className="flex items-center gap-1.5">
+          <div
+            className={`w-2 h-2 rounded-full ${stage.active ? `${stage.color} animate-bounce` : 'bg-white/15'}`}
+          />
+          <span className="text-xs text-white/40">{stage.label}</span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
-// Track collaboration connection
-const connectCollaboration = () => {
-  setCollaborationMode(true)
-  // In a real implementation, this would connect to a signaling server
-  setCollaborators(prev => [...prev, { userId, name: 'You', connectedAt: Date.now() }])
+function CommandHints() {
+  return (
+    <div className="p-2 bg-gray-900 text-xs text-gray-300 rounded mb-2 uppercase">
+      <p className="text-xs mb-1 text-gray-400">Shortcuts</p>
+      <div className="flex gap-1">
+        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Cmd+K</kbd>
+        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Esc</kbd>
+        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Ctrl+Enter</kbd>
+        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Ctrl+J</kbd>
+      </div>
+    </div>
+  )
 }
 
-// Disconnect collaboration
-const disconnectCollaboration = () => {
-  setCollaborationMode(false)
-  setCollaborators(prev => prev.filter(c => c.userId !== userId))
+function CommandPalette() {
+  const [q, setQ] = useState('')
+  const cmds = [
+    { key: 'new-project', label: 'New Project', description: 'Start a fresh project' },
+    { key: 'open-file', label: 'Open File', description: 'Open a file from disk' },
+    { key: 'refactor', label: 'Refactor Code', description: 'Auto-refactor selected code' },
+    { key: 'debug', label: 'Debug', description: 'Run debugger on current file' },
+    { key: 'terminal', label: 'New Terminal', description: 'Open terminal at project root' },
+  ]
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur z-50 flex items-center justify-center">
+      <div className="relative bg-[#1e1e1e] rounded-2xl p-8 w-80 max-w-full animate-pop border border-white/10">
+        <button
+          onClick={() => setQ('')}
+          className="absolute top-4 right-4 w-8 h-8 rounded bg-white/10 text-white/50 flex items-center justify-center hover:bg-white/20 hover:text-white transition-colors"
+        >
+          �
+        </button>
+        <h3 className="text-lg mb-6 text-center text-white">Command Palette</h3>
+        <input
+          onChange={(e) => setQ(e.target.value)}
+          value={q}
+          className="w-full bg-[#252526] border border-white/10 rounded p-2 pl-12 focus:bg-[#3c3c3c] focus:border-[#635bff] focus:text-white placeholder-white/30 transition-colors"
+          placeholder="Type a command..."
+        />
+        <div className="mt-6 space-y-3 max-h-80 overflow-y-auto">
+          {cmds
+            .filter((c) => c.label.toLowerCase().includes(q.toLowerCase()))
+            .map((c) => (
+              <div key={c.key} className="flex items-center gap-3 p-3 rounded hover:bg-white/5 cursor-pointer transition-colors">
+                <span className="w-1.5 h-1.5 bg-[#635bff] rounded-full animate-pulse" />
+                <div>
+                  <p className="font-medium text-white">{c.label}</p>
+                  <p className="text-xs text-white/40">{c.description}</p>
+                </div>
+              </div>
+            ))}
+        </div>
+        <CommandHints />
+      </div>
+    </div>
+  )
 }
 
-// Add AI suggestion
-const addAISuggestion = (suggestion: {
-  type: 'refactor' | 'test' | 'doc' | 'fix'
-  title: string
-  description: string
-  code?: string
-  confidence: number
-}) => {
-  setAISuggestions(prev => [...prev, { id: Date.now().toString(), ...suggestion }])
-}
+function ContextAwarePrompting() {
+  const [prompt, setPrompt] = useState('')
+  const contexts = [
+    {
+      trigger: 'file-viewed',
+      message: "I see you're viewing a React component. Would you like me to help extract props or generate unit tests?",
+    },
+    {
+      trigger: 'recent-actions',
+      message: 'You just saved a file. Would you like to commit changes or preview the updated component?',
+    },
+    {
+      trigger: 'selection',
+      message: 'Code is selected. I can help refactor, extract function, or generate documentation for this block.',
+    },
+  ]
 
-// Generate Docker deployment
-const generateDockerDeploy = () => {
-  setIsBuildingDocker(true)
-  setDockerLog('Building Docker image...')
-  // In a real implementation, this would call a deployment API
-  setTimeout(() => {
-    setIsBuildingDocker(false)
-    setDockerLog('Docker image built successfully!')
-  }, 2000)
+  return (
+    <>
+      <div className="p-4 bg-[#1e1e1e] rounded border border-white/10 mb-4">
+        <p className="font-medium text-white mb-1">Suggestion:</p>
+        <p className="text-sm text-white/60 break-all">{prompt || contexts[0].message}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mt-4">
+        {contexts.map((c) => (
+          <button
+            key={c.trigger}
+            onClick={() => setPrompt(c.message)}
+            className="p-2 bg-[#252526] rounded text-xs text-white/60 hover:bg-[#3c3c3c] hover:text-white cursor-pointer transition-colors"
+          >
+            {c.trigger}
+          </button>
+        ))}
+      </div>
+    </>
+  )
 }
