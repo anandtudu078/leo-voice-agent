@@ -592,3 +592,107 @@ const CommandHints = () => <div className="p-2 bg-gray-900 text-xs text-gray-300
 const VoiceCommandHistory = () => <div className="h-80 border rounded p-4 bg-gray-900 overflow-y-auto"><h4 className="font-bold mb-4">Command History</h4><div className="space-y-3">{/* transcripts, code, results, TTS players rendered dynamically */}</div></div>
 const CommandPalette = () => { let [q, setQ] = React.useState(""); const cmds = [{"key":"new-project","label":"New Project","description":"Start a fresh project"},{"key":"open-file","label":"Open File","description":"Open a file from disk"},{"key":"refactor","label":"Refactor Code","description":"Auto-refactor selected code"},{"key":"debug","label":"Debug","description":"Run debugger on current file"},{"key":"terminal","label":"New Terminal","description":"Open terminal at project root"}]; return <div className="fixed inset-0 bg-black/60 backdrop-blur z-50 flex items-center justify-center"><div className="relative bg-gray-900 rounded-2xl p-8 w-80 max-w-full animate-pop"><button onClick={()=>setQ("")} className="absolute top-4 right-4 w-8 h-8 rounded bg-gray-700 text-gray-300 flex items-center justify-center">×</button><h3 className="text-lg mb-6 text-center">Command Palette</h3><input onChange={(e)=>setQ(e.target.value)} value={q} className="w-full bg-gray-800 border rounded p-2 pl-12 focus:bg-gray-700 focus:border-gray-400 focus:text-white placeholder-gray-400 transition-colors" placeholder="Type a command..."/><div className="mt-6 space-y-3 max-h-80 overflow-y-auto">{cmds.filter(c=>c.label.toLowerCase().includes(q.toLowerCase())).map((c,i)=><div key={i} className="flex items-center gap-3 p-3 rounded cursor-hover:bg-gray-800"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"/><div><p className="font-medium text-gray-200">{c.label}</p><p className="text-xs text-gray-400">{c.description}</p></div></div>))}</div></div></div>
 const ContextAwarePrompting = () => { let [p, setP] = React.useState(""); const ctxs = [{"trigger":"file-viewed","message":"I see you're viewing a React component. Would you like me to help extract props or generate unit tests?"},{"trigger":"recent-actions","message":"You just saved a file. Would you like to commit changes or preview the updated component?"},{"trigger":"selection","message":"Code is selected. I can help refactor, extract function, or generate documentation for this block."}]; return <div className="p-4 bg-gray-900 rounded mb-4"><p className="font-medium text-gray-200 mb-1">Suggestion:</p><p className="text-sm text-gray-300 break-all">{p}</p></div><div className="grid grid-cols-2 gap-2 mt-4">{ctxs.map((c,i)=><button key={i} className="p-2 bg-gray-800 rounded text-xs hover:bg-gray-700 cursor-pointer">{c.trigger}</button>))}</div>
+/// Phase 3: Hands‑Free & Voice Learning Features
+
+const [isHandsFree, setIsHandsFree] = useState(false)
+
+const [lastActiveFile, setLastActiveFile] = useState<string | null>(null)
+
+const [voiceHistoryMemory, setVoiceHistoryMemory] = useState<Array<{ transcript: string; timestamp: number }>>([])
+
+const [focusedFile, setFocusedFile] = useState<string | null>(null)
+
+const [recentFiles, setRecentFiles] = useState<Array<{ path: string; openedAt: number }>>([])
+
+const [executionResults, setExecutionResults] = useState<Array<{
+  id: string
+  type: "test" | "output" | "error" | "tts"
+  content: string
+  timestamp: number
+  passed?: boolean
+  executable?: boolean
+}>>([])
+
+const [commandFrequency, setCommandFrequency] = useState<Map<string, number>>(new Map())
+
+const trackCommand = (command: string) => {
+  setCommandFrequency(prev => {
+    const freq = new Map(prev)
+    freq.set(command, (freq.get(command) ?? 0) + 1)
+    return freq
+  })
+}
+
+const sortedCommands = React.useMemo(() => {
+  const entries: [string, number][] = [...commandFrequency.entries()]
+  entries.sort((a, b) => b[1] - a[1])
+  return entries.reduce((acc, [key,]) => {
+    acc.push(key)
+    return acc
+  }, [] as string[])
+}, [commandFrequency])
+
+// ---- Phase 4: Advanced Features ----
+// Voice collaboration & multi-user support
+const [collaborationMode, setCollaborationMode] = useState(false)
+const [sharedCursor, setSharedCursor] = useState({ x: 0, y: 0, userId: '' })
+const [collaborators, setCollaborators] = useState<Array<{ userId: string; name: string; connectedAt: number }>>([])
+
+// AI-assisted coding enhancements
+const [aiSuggestions, setAISuggestions] = useState<Array<{
+  id: string
+  type: 'refactor' | 'test' | 'doc' | 'fix'
+  title: string
+  description: string
+  code?: string
+  confidence: number
+}>>([])
+const [isGeneratingAI, setIsGeneratingAI] = useState(false)
+
+// Voice biometrics and user tracking
+const [userId, setUserId] = useState(generateUserId())
+const [voicePrint, setVoicePrint] = useState<Array<number>>([])
+
+// Docker and deployment state
+const [isBuildingDocker, setIsBuildingDocker] = useState(false)
+const [dockerLog, setDockerLog] = useState<string>('')
+
+// Generate a unique user ID
+function generateUserId(): string {
+  return 'user_' + Math.random().toString(36).substr(2, 9)
+}
+
+// Track collaboration connection
+const connectCollaboration = () => {
+  setCollaborationMode(true)
+  // In a real implementation, this would connect to a signaling server
+  setCollaborators(prev => [...prev, { userId, name: 'You', connectedAt: Date.now() }])
+}
+
+// Disconnect collaboration
+const disconnectCollaboration = () => {
+  setCollaborationMode(false)
+  setCollaborators(prev => prev.filter(c => c.userId !== userId))
+}
+
+// Add AI suggestion
+const addAISuggestion = (suggestion: {
+  type: 'refactor' | 'test' | 'doc' | 'fix'
+  title: string
+  description: string
+  code?: string
+  confidence: number
+}) => {
+  setAISuggestions(prev => [...prev, { id: Date.now().toString(), ...suggestion }])
+}
+
+// Generate Docker deployment
+const generateDockerDeploy = () => {
+  setIsBuildingDocker(true)
+  setDockerLog('Building Docker image...')
+  // In a real implementation, this would call a deployment API
+  setTimeout(() => {
+    setIsBuildingDocker(false)
+    setDockerLog('Docker image built successfully!')
+  }, 2000)
+}
