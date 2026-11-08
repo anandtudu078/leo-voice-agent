@@ -1,17 +1,14 @@
 import { useState } from "react";
-import { Collection } from "@radix-ui/react-collection";
-import { Menu } from "@radix-ui/react-menu";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { LogIn, UserPlus } from "lucide-react";
+import { LogIn, Mic } from "lucide-react";
 
 export default function LoginPage({
   onLogin,
   setAuth,
 }: {
   onLogin: (email: string) => void;
-  setAuth: (value: "logged-in" | "logged-out") => void;
+  setAuth: (value: "logging-in" | "logged-in" | "logged-out") => void;
 }) {
   const [email, setEmail] = useState<string>("");
   const [error, setError] = useState<string | null>(null);

@@ -1,7 +1,5 @@
 import { useState } from "react";
-import { Collection } from "@radix-ui/react-collection";
-import { Menu } from "@radix-ui/react-menu";
-import { UserPlus, Mic, Code, Search, Loader2, Sunrise } from "lucide-react";
+import { Search } from "lucide-react";
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
@@ -14,7 +12,7 @@ export function CommandPalette() {
     { name: "New Terminal", description: "Open a new terminal" },
   ]);
 
-  const handleSearch = (e: React.ChangeEvent) => {
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setQuery(e.target.value);
   };
 
