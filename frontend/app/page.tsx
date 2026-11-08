@@ -19,6 +19,7 @@ import { useAuthStore } from '@/app/auth'
 export default function LandingPage() {
   const { session, signIn, signOut } = useAuthStore()
   const [email, setEmail] = useState('')
+  const [showLogin, setShowLogin] = useState(false)
 
   // Redirect authenticated visitors to the code-space IDE after the
   // component has mounted (and hydrated). This is a client-side redirect
@@ -28,6 +29,11 @@ export default function LandingPage() {
       window.location.href = '/code'
     }
   }, [session, session?.user])
+
+  function submitSignIn(e: React.FormEvent) {
+    e.preventDefault()
+    signIn(email, '')
+  }
 
   return (
     <main className="min-h-screen bg-[#0b0f19] text-white flex flex-col">
@@ -49,7 +55,7 @@ export default function LandingPage() {
             <div className="flex items-center gap-3">
               <span className="text-white/70 text-sm hidden sm:inline">{session.user.email}</span>
               <button
-                onClick={signOut}
+                    onClick={signOut}
                 className="px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/80 transition-colors"
               >
                 Sign out
@@ -57,7 +63,7 @@ export default function LandingPage() {
             </div>
           ) : (
             <button
-              onClick={() => signIn(email, '')}
+                    onClick={() => setShowLogin(true)}
               className="px-4 py-1.5 rounded-md bg-[#635bff] text-white text-sm font-medium hover:opacity-90 transition-opacity"
             >
               Sign in
@@ -70,7 +76,7 @@ export default function LandingPage() {
       <section className="relative flex flex-col lg:flex-row items-center py-24 md:py-32 px-6 md:px-12 pt-20">
         <div className="flex-1 text-center lg:text-left max-w-xl">
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-tight tracking-tight">
-            Write your project{' '}
+            Build your project{' '}
             <span className="text-[#635bff]">by voice</span>.
           </h1>
           <p className="mt-5 text-lg text-white/60">
@@ -79,7 +85,7 @@ export default function LandingPage() {
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center lg:justify-start gap-4">
             <button
-              onClick={() => signIn(email, '')}
+                    onClick={() => setShowLogin(true)}
               className="flex items-center gap-2 px-6 py-3 rounded-lg bg-[#635bff] text-white font-medium hover:opacity-90 transition-opacity"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -97,6 +103,38 @@ export default function LandingPage() {
             </a>
           </div>
         </div>
+
+        {showLogin && (
+          <div className="flex-1 flex items-start justify-center px-4 pb-8">
+            <form onSubmit={submitSignIn} className="w-full max-w-md">
+              <div className="bg-white/5 rounded-xl border border-white/10 p-5">
+                <h2 className="text-lg font-semibold mb-4">Sign in to Project Workspace</h2>
+                <div className="space-y-3">
+                  <label className="flex items-center gap-2 text-sm text-white/60">
+                    <span className="text-white/40">Email</span>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-md bg-black/20 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:border-[#635bff]"
+                      placeholder="you@example.com"
+                      autoFocus
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="w-full px-4 py-2.5 rounded-md bg-[#635bff] text-white font-medium hover:opacity-90 transition-opacity"
+                  >
+                    Sign in
+                  </button>
+                </div>
+              </div>
+              <p className="text-center text-sm text-white/30 mt-3">
+                No account needed — any valid email works (free forever).
+              </p>
+            </form>
+          </div>
+        )}
 
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center text-white/40 max-w-xs">
