@@ -15,11 +15,6 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function buildCookieHeader(session: AuthSession | null): string | null {
-  if (!session) return null
-  return `freebuff_session=${JSON.stringify({ user: session.user })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`
-}
-
 async function readSession(): Promise<AuthSession | null> {
   if (typeof window === 'undefined') return null
   try {
@@ -100,5 +95,5 @@ export function useAuthStore() {
 }
 
 export function ProvidersWithAuth({ children }: { children: ReactNode }) {
-  return React.createElement(Providers, { children })
+  return React.createElement(Providers, null, children)
 }

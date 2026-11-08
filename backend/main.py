@@ -11,23 +11,19 @@ Routes:
     WS   /ws/talk             - bidirectional voice conversation (STT -> agent -> TTS)
 """
 
+import asyncio
 import base64
+import binascii
 import hashlib
 import hmac
 import json
 import os
 import secrets
-import requests
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
+from pathlib import Path
 
-import requests as http_requests
-from fastapi import FastAPI, Body, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.requests import Request
-from fastapi.responses import RedirectResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from google import genai
 from dotenv import load_dotenv
@@ -61,7 +57,9 @@ def _encode_session(email: str) -> str:
         {"email": email, "iat": now, "exp": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()},
         separators=(",", ":"),
     ).encode()
-    return base64.urlsafe_b64encode(payload).decode().rstrip("=") + "." + _sign(payload)
+    # Sign the encoded payload: _decode_session verifies the base64 segment.
+    encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    return encoded + "." + _sign(encoded.encode())
 
 
 def _decode_session(token: str) -> dict | None:
@@ -82,16 +80,6 @@ def _decode_session(token: str) -> dict | None:
         return payload
     except Exception:
         return None
-
-
-def read_session(request_headers: dict) -> dict | None:
-    """Read the session cookie from the request headers and validate it."""
-    cookie = request_headers.get("cookie") or ""
-    for part in cookie.split(";"):
-        key, _, value = part.strip().partition("=")
-        if key == SESSION_COOKIE:
-            return _decode_session(value)
-    return None
 
 
 def write_session(email: str) -> str:
@@ -128,6 +116,14 @@ class SignInResponse(JSONResponse):
 app = FastAPI(title="Leo Voice Agent API")
 
 
+@app.middleware("http")
+async def attach_session(request: Request, call_next):
+    """Decode the signed session cookie once per request."""
+    token = request.cookies.get(SESSION_COOKIE)
+    request.state.session = _decode_session(token) if token else None
+    return await call_next(request)
+
+
 # ---------------------------------------------------------------------------
 # Public API: authentication
 #
@@ -140,14 +136,6 @@ app = FastAPI(title="Leo Voice Agent API")
 
 
 
-def _get_session_cookie(request: Request) -> str | None:
-    """Read the signed session cookie from an incoming request."""
-    cookie = request.headers.get("cookie") or ""
-    for part in cookie.split(";"):
-        key, _, value = part.strip().partition("=")
-        if key == SESSION_COOKIE:
-            return value
-    return None
 @app.post("/api/auth/signin")
 async def auth_signin(req: SignInRequest):
     email = req.email.strip()
@@ -230,13 +218,6 @@ async def echo(msg: str = Body(default="hello")):
     ]}
 
 
-# CORS middleware
-#
-# `allow_credentials=True` forbids wildcard origins, so restrict CORS to
-# the known frontend host(s) so signed cookies transmit correctly in the
-# browser. Set LEO_FRONTEND_ORIGIN to widen or narrow it.
-_leo_frontend_origins = os.getenv("LEO_FRONTEND_ORIGIN", "http://localhost:3000")
-
 # CORS middleware is disabled: the Next.js frontend proxies /api/* to
 # http://localhost:8000/api/*, so the browser never sends cross-origin
 # requests to the backend directly. Remove CORSMiddleware to avoid the known
@@ -245,29 +226,67 @@ _leo_frontend_origins = os.getenv("LEO_FRONTEND_ORIGIN", "http://localhost:3000"
 # Initialize Google Gemini using the new google-genai SDK
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+SYSTEM_INSTRUCTION = (
+    "You are Leo, a voice coding assistant inside a browser IDE. Keep answers "
+    "short and spoken-friendly (at most three sentences) unless the user asks "
+    "for code, in which case reply with the code and one line of context."
+)
+
 GNANI_API_KEY = os.getenv("GNANI_API_KEY")
-GNANI_STT_URL = os.getenv("GNANI_STT_URL", "https://api.vachana.ai/stt/v3")
-GNANI_TTS_URL = os.getenv("GNANI_TTS_URL", "https://api.vachana.ai/tts/v3")
 
 from pipeline.orchestrator import plan_from_transcript
 from pipeline.stt import GnaniSTTClient, GnaniSTTError
 from pipeline.tts import GnaniTTSClient, GnaniTTSError
-from sandbox import SandboxExecutor
+from sandbox import SandboxExecutionError, SandboxExecutor
 
 stt_client = GnaniSTTClient()
 tts_client = GnaniTTSClient()
+
+# The voice IDE edits a single workspace directory. Files never leave it.
+RUN_SCRIPT_NAME = "snippet.py"
+
+
+def _workspace_root() -> Path:
+    root = Path(os.getenv("LEO_WORKSPACE_ROOT", "session")).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+workspace_executor = SandboxExecutor(root=_workspace_root())
+
+
+def _workspace() -> Path:
+    """Return the workspace directory shared by the voice IDE endpoints."""
+    return workspace_executor.workspace("")
+
+
+def _workspace_files() -> list[dict]:
+    """List the workspace files as {"path", "name", "kind"} entries."""
+    workspace = _workspace()
+    entries: list[dict] = []
+    for path in sorted(workspace.rglob("*")):
+        if not path.is_file():
+            continue
+        entries.append(
+            {"path": path.relative_to(workspace).as_posix(), "name": path.name, "kind": "file"}
+        )
+        if len(entries) >= 200:
+            break
+    return entries
+
+
+def _decode_audio(payload: str) -> bytes:
+    """Decode base64 audio, accepting the `data:` URL prefix FileReader adds."""
+    if payload.startswith("data:"):
+        payload = payload.split(",", 1)[-1]
+    return base64.b64decode(payload)
 
 
 # ---------------------------------------------------------------------------
 # Shared helper: transcript -> spoken reply (STT -> LLM -> TTS)
 # ---------------------------------------------------------------------------
-
-
-async def _transcribe_audio(audio_bytes: bytes, filename: str, content_type: str) -> str:
-    try:
-        return stt_client.transcribe(audio_bytes, filename, content_type)
-    except GnaniSTTError as exc:
-        raise HTTPException(status_code=500, detail=f"Gnani STT Error: {exc}") from exc
 
 
 async def _generate_reply(transcript: str) -> str:
@@ -278,7 +297,7 @@ async def _generate_reply(transcript: str) -> str:
         {"name": "run_script", "description": "Run a script"},
     ]
     try:
-        plan = plan_from_transcript(transcript, tools)
+        plan = await asyncio.to_thread(plan_from_transcript, transcript, tools)
         # Evon fired a real tool call: report intent, leave the actual execution to the
         # caller (HTTP returns code + logs, WebSocket routes it through the sandbox).
         if plan.get("action") in {"read", "write", "run"} and plan.get("tool"):
@@ -287,13 +306,14 @@ async def _generate_reply(transcript: str) -> str:
                 "I'll run it now. "
                 f"Reason: {plan.get('reason', '')}"
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         # Evon is optional; fall through to plain Gemini.
         pass
 
     try:
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=GEMINI_MODEL,
             contents=f"{SYSTEM_INSTRUCTION}\n\nUser: {transcript}",
         )
         return response.text or "I understood that, but I have nothing to do right now."
@@ -318,48 +338,163 @@ async def _speak(text: str) -> bytes:
 
 @app.websocket("/ws/process-voice")
 async def websocket_process_voice(websocket: WebSocket):
-    await websocket.accept()
-    await websocket.send_json({
-        "type": "ready",
-        "message": "Leo is listening. Speak.",
-        "code": "",
-        "plan": {"action": "none", "tool": "", "reason": ""},
-        "assigned": {"tool": "", "file": ""},
-        "logs": [],
-        "tts-ready": "Ready for next turn.",
-    })
+    """Voice IDE socket: audio/text in, transcript + spoken reply + files out.
 
-    audio_chunks: list[bytes] = []
+    Client -> Server (JSON):
+        {"type": "audio", "data": "base64 or data: URL"}
+        {"type": "text", "text": "voice command"}
+        {"type": "read_file", "path": "main.py"}
+        {"type": "create_file" | "write_file", "path": "main.py", "code": "..."}
+        {"type": "delete_file", "path": "main.py"}
+        {"type": "run_script", "path": "main.py"}
+    Server -> Client (JSON):
+        {"type": "ready", "files": [...]}
+        {"type": "transcript", "transcript": "..."}
+        {"type": "turn-started"} | {"type": "waiting"} | {"type": "listening"}
+        {"type": "speech", "speech": "base64 audio", "text": "spoken reply"}
+        {"type": "file", "path": "...", "content": "..."}
+        {"type": "logs", "logs": [...]}
+        {"type": "error", "error": "..."}
+    """
+    await websocket.accept()
+    await websocket.send_json(
+        {
+            "type": "ready",
+            "message": "Leo is listening. Speak or send a command.",
+            "files": _workspace_files(),
+        }
+    )
+
+    async def run_turn(transcript: str) -> None:
+        await websocket.send_json({"type": "turn-started"})
+        await websocket.send_json({"type": "waiting", "message": "Thinking..."})
+        try:
+            reply = await _generate_reply(transcript)
+            audio = await _speak(reply)
+        except HTTPException as exc:
+            await websocket.send_json({"type": "error", "error": str(exc.detail)})
+            return
+        await websocket.send_json(
+            {
+                "type": "speech",
+                "speech": base64.b64encode(audio).decode("ascii") if audio else "",
+                "text": reply,
+            }
+        )
+        await websocket.send_json({"type": "listening", "message": "I'm listening now."})
+
+    async def handle_audio(audio: bytes) -> None:
+        try:
+            transcript = await asyncio.to_thread(
+                stt_client.transcribe, audio, "microphone.webm", "audio/webm"
+            )
+        except GnaniSTTError as exc:
+            await websocket.send_json({"type": "error", "error": str(exc)})
+            return
+        await websocket.send_json({"type": "transcript", "transcript": transcript})
+        await run_turn(transcript)
+
     try:
         while True:
-            data = await websocket.receive_bytes()
-            if data is None:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            binary = message.get("bytes")
+            if binary:
+                # Backwards compatibility: clients that stream raw audio frames.
+                await handle_audio(binary)
                 continue
-            audio_chunks.append(data)
-            # Stream transcription as the user speaks
-            if len(audio_chunks) >= 8000:
+
+            frame = message.get("text")
+            if not frame:
+                continue
+
+            try:
+                payload = json.loads(frame)
+            except ValueError:
+                await websocket.send_json({"type": "error", "error": "Invalid JSON message"})
+                continue
+            if not isinstance(payload, dict):
+                await websocket.send_json(
+                    {"type": "error", "error": "Message must be a JSON object"}
+                )
+                continue
+
+            msg_type = payload.get("type")
+            path = str(payload.get("path") or "")
+            workspace = _workspace()
+
+            if msg_type == "audio":
                 try:
-                    transcript = stt_client.transcribe(
-                        b"".join(audio_chunks), "microphone.wav", "audio/webm"
+                    audio = _decode_audio(str(payload.get("data") or ""))
+                except (binascii.Error, ValueError):
+                    await websocket.send_json({"type": "error", "error": "Bad audio payload"})
+                    continue
+                if audio:
+                    await handle_audio(audio)
+
+            elif msg_type == "text":
+                transcript = str(payload.get("text") or "").strip()
+                if transcript:
+                    await websocket.send_json({"type": "transcript", "transcript": transcript})
+                    await run_turn(transcript)
+
+            elif msg_type == "read_file":
+                try:
+                    content = workspace_executor.read(workspace, path)
+                except SandboxExecutionError as exc:
+                    await websocket.send_json({"type": "error", "error": str(exc)})
+                    continue
+                await websocket.send_json({"type": "file", "path": path, "content": content})
+
+            elif msg_type in {"create_file", "write_file"}:
+                try:
+                    saved = workspace_executor.write(
+                        workspace, path, str(payload.get("code") or "")
                     )
-                    if transcript:
-                        await websocket.send_json({"type": "transcript", "transcript": transcript})
-                        audio_chunks = []
-                except GnaniSTTError:
-                    audio_chunks = []
+                except SandboxExecutionError as exc:
+                    await websocket.send_json({"type": "error", "error": str(exc)})
+                    continue
+                await websocket.send_json(
+                    {
+                        "type": "logs",
+                        "logs": [f"> Saved {path} ({saved})"],
+                        "files": _workspace_files(),
+                    }
+                )
+
+            elif msg_type == "delete_file":
+                try:
+                    workspace_executor.remove(workspace, path)
+                except SandboxExecutionError as exc:
+                    await websocket.send_json({"type": "error", "error": str(exc)})
+                    continue
+                await websocket.send_json(
+                    {"type": "logs", "logs": [f"> Deleted {path}"], "files": _workspace_files()}
+                )
+
+            elif msg_type == "run_script":
+                try:
+                    output = await asyncio.to_thread(workspace_executor.run, workspace, path)
+                except SandboxExecutionError as exc:
+                    await websocket.send_json({"type": "logs", "logs": [str(exc)]})
+                    continue
+                await websocket.send_json(
+                    {"type": "logs", "logs": [output.strip() or f"> {path} finished with no output"]}
+                )
+
+            else:
+                await websocket.send_json(
+                    {"type": "error", "error": f"Unsupported message type: {msg_type!r}"}
+                )
     except WebSocketDisconnect:
         pass
     finally:
-        if audio_chunks:
-            try:
-                transcript = stt_client.transcribe(
-                    b"".join(audio_chunks), "microphone.wav", "audio/webm"
-                )
-                if transcript:
-                    await websocket.send_json({"type": "transcript", "transcript": transcript})
-            except GnaniSTTError:
-                pass
-        await websocket.send_json({"type": "stopped", "message": "Done listening."})
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -368,8 +503,15 @@ async def websocket_process_voice(websocket: WebSocket):
 
 
 @app.post("/api/process-voice")
-async def process_voice_text(text: str = Body(...)):
-    """One-shot: receive a text command, transcribe+generate (kept for HTTP tests)."""
+async def process_voice_text(payload: dict | str = Body(...)):
+    """One-shot: receive a text command and return the agent's reply.
+
+    Accepts either a raw JSON string (`"hello"`) or `{"text": "hello"}`.
+    """
+    text = payload.get("text", "") if isinstance(payload, dict) else payload
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
     try:
         reply_text = await _generate_reply(text)
         return {"text": text, "reply": reply_text}
@@ -455,12 +597,13 @@ async def websocket_talk(websocket: WebSocket):
                 if code:
                     await websocket.send_json({"type": "code", "code": code})
                     try:
-                        from pipeline.sandbox import SandboxExecutor
-
-                        executor = SandboxExecutor()
-                        result = await executor.run(code)
+                        workspace = _workspace()
+                        workspace_executor.write(workspace, RUN_SCRIPT_NAME, code)
+                        result = await asyncio.to_thread(
+                            workspace_executor.run, workspace, RUN_SCRIPT_NAME
+                        )
                         await websocket.send_json({"type": "logs", "logs": [result]})
-                    except Exception as exc:  # noqa: BLE001
+                    except SandboxExecutionError as exc:
                         await websocket.send_json({"type": "error", "message": str(exc)})
 
             elif msg_type == "plan":
@@ -526,10 +669,7 @@ async def websocket_talk(websocket: WebSocket):
 
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
-    import sys
-    print(f"[DBG] 404 handler called, type(exc)={type(exc).__name__}, status={exc.status_code}", file=sys.stderr)
-    resp = JSONResponse(status_code=404, content={"detail": "Not Found"})
-    return resp
+    return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 
 @app.get("/api/files")
@@ -574,7 +714,7 @@ async def list_files(directory: str = "session"):
 async def tts_synthesize(text: str):
     """Return the agent's spoken audio bytes for a given text."""
     if not text:
-        return {"audio": b"", "type": "empty"}
+        return {"audio": "", "type": "empty"}
     audio = await _speak(text)
     return {"audio": base64.b64encode(audio).decode("ascii"), "type": "base64"}
 

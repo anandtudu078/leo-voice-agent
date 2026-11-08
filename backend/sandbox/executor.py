@@ -35,23 +35,33 @@ class SandboxExecutor:
         workspace.mkdir(parents=True, exist_ok=True)
         return workspace
 
+    def _resolve(self, workspace: Path, path: str | Path) -> Path:
+        """Resolve ``path`` inside ``workspace``, rejecting escapes."""
+        root = workspace.resolve()
+        resolved = (root / path).resolve()
+        if resolved != root and root not in resolved.parents:
+            raise SandboxExecutionError("Path escapes the workspace")
+        return resolved
+
     def read(self, workspace: Path, path: str) -> str:
         """Read a file relative to the workspace. Returns its text content."""
-        resolved = (workspace / path).resolve()
-        if not str(resolved).startswith(str(workspace.resolve())):
-            raise SandboxExecutionError("Path escapes the workspace")
+        resolved = self._resolve(workspace, path)
         if not resolved.is_file():
             raise SandboxExecutionError(f"File not found: {path}")
         return resolved.read_text(encoding="utf-8")
 
     def write(self, workspace: Path, path: str, code: str) -> str:
         """Write code to a file inside the workspace and return its path."""
-        resolved = (workspace / path).resolve()
-        if not str(resolved).startswith(str(workspace.resolve())):
-            raise SandboxExecutionError("Path escapes the workspace")
+        resolved = self._resolve(workspace, path)
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(code, encoding="utf-8")
         return str(resolved)
+
+    def remove(self, workspace: Path, path: str) -> None:
+        """Delete a file inside the workspace."""
+        resolved = self._resolve(workspace, path)
+        if resolved.is_file():
+            resolved.unlink()
 
     def run(self, workspace: Path, script_path: str, args: list[str] | None = None) -> str:
         """Execute a script within the workspace in a fresh subprocess.
@@ -59,31 +69,24 @@ class SandboxExecutor:
         Only ``python`` / ``node`` scripts may be executed; binary/file
         removal and shell concatenation are deliberately blocked.
         """
-        executable = None
-        if script_path.endswith(".py"):
-            executable = sys.executable
-        elif script.endswith(".js") or script.endswith(".mjs"):
-            executable = os.environ.get("NODE_BINARY") or "node"
-        else:
-            raise SandboxExecutionError(f"Unsupported script type: {script}")
-
-        script_path = (workspace / script_path).resolve()
+        resolved = self._resolve(workspace, script_path)
+        if not resolved.is_file():
+            raise SandboxExecutionError(f"File not found: {script_path}")
 
         # Only trusted interpreters are allowed; block shell pipelines and
         # arbitrary binary execution.
-        resolved = script_path
-        if not str(resolved).startswith(str(workspace.resolve())):
-            raise SandboxExecutionError("Path escapes the workspace")
-        resolved = resolved
-        if resolved.suffix not in {".py", ".js", ".mjs"}:
+        if resolved.suffix == ".py":
+            executable = sys.executable
+        elif resolved.suffix in {".js", ".mjs"}:
+            executable = os.environ.get("NODE_BINARY") or "node"
+        else:
             raise SandboxExecutionError("Only .py/.js/.mjs scripts may be run")
 
-        script_path.write_text(self.read(workspace, script_path), encoding="utf-8")
         args = args or []
 
         try:
             result = subprocess.run(
-                [executable, str(script_path)] + args,
+                [executable, str(resolved)] + args,
                 cwd=workspace,
                 capture_output=True,
                 text=True,

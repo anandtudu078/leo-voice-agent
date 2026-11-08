@@ -45,19 +45,25 @@ class GnaniSTTClient:
         files = {"audio_file": (filename, audio_bytes, content_type or "audio/wav")}
         data = {"language_code": self.language, "model": self.model}
 
-        response = requests.post(
-            self.base_url,
-            headers=headers,
-            files=files,
-            data=data,
-            timeout=60,
-        )
+        try:
+            response = requests.post(
+                self.base_url,
+                headers=headers,
+                files=files,
+                data=data,
+                timeout=60,
+            )
+        except requests.RequestException as exc:
+            raise GnaniSTTError(f"Gnani STT request failed: {exc}") from exc
 
         if response.status_code != 200:
             detail = response.text or f"Gnani STT returned HTTP {response.status_code}"
             raise GnaniSTTError(detail)
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise GnaniSTTError("Gnani STT returned a non-JSON response") from exc
 
         # Gnani STT returns the transcript under a "transcript" key.
         if not isinstance(payload, dict) or "transcript" not in payload:

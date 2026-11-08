@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from ..pipeline.errors import ToolExecutionError
+from pipeline.errors import ToolExecutionError
 
 WORKSPACE_ROOT = Path(os.getenv("LEO_WORKSPACE_ROOT", ".")).resolve()
 
@@ -18,7 +18,7 @@ def read_file(path: str, workspace: Path | None = None) -> str:
     resolved = (root / path).resolve()
 
     # Prevent escaping the sandbox.
-    if not str(resolved).startswith(str(root)):
+    if resolved != root and root not in resolved.parents:
         raise ToolExecutionError("Path escapes the workspace")
 
     if not resolved.is_file():
