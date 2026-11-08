@@ -30,6 +30,16 @@ export default function LandingPage() {
     }
   }, [session, session?.user])
 
+  // Fetch voice history after redirect
+  useEffect(() => {
+    if (window.location.href.includes('/code')) {
+      fetch('/api/history', { credentials: 'include' })
+        .then((res) => res.json())
+        .then((data) => setHistory(data.turns || []))
+        .catch((err) => console.error("Failed to fetch history:", err))
+    }
+  }, [])
+
   function submitSignIn(e: React.FormEvent) {
     e.preventDefault()
     signIn(email)
