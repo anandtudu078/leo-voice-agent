@@ -1,10 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useAuthStore } from '@/app/auth'
-import Editor from 'react-simple-code-editor'
-import { MenuItem } from '@radix-ui/react-menu'
-import { Command } from 'react-command-palette'
 
 import { ActivityBar } from './ActivityBar'
 import { SideBar } from './SideBar'
@@ -98,6 +94,30 @@ export default function CodeSpace() {
 // IDE shell: holds all workspace/editor/voice state and renders the chrome.
 // ---------------------------------------------------------------------------
 
+type StarterFile = { path: string; kind: 'file' | 'dir'; name: string }
+
+const STARTER_FILES: StarterFile[] = [
+  { path: 'main.py', kind: 'file', name: 'main.py' },
+  { path: 'app.py', kind: 'file', name: 'app.py' },
+  { path: 'README.md', kind: 'file', name: 'README.md' },
+  { path: 'sandbox.py', kind: 'file', name: 'sandbox.py' },
+]
+
+const starterFiles = () => STARTER_FILES.map((file) => ({ ...file }))
+
+const STARTER_CODE = `# Leo voice agent - build your project by voice
+
+# Speak: "open main.py", "write a hello function", "run main.py"
+
+def hello(name=""):
+    return f"Hello, {name or 'world'}!"
+
+if __name__ == "__main__":
+    print(hello())
+
+# Add your code below this line.
+`
+
 function CodeSpaceShell({
   user,
   signOut,
@@ -122,10 +142,13 @@ function CodeSpaceShell({
   setTtsStatus: (s: 'idle' | 'speaking' | 'error') => void
 }) {
   // ---- Workspace state ----
-  const [files, setFiles] = useState<{ path: string; kind: 'file' | 'dir'; name: string }[]>([])
-  const [tree, setTree] = useState<{ path: string; kind: 'file' | 'dir'; name: string }[]>([])
-  const [activeFile, setActiveFile] = useState<string | null>(null)
-  const [content, setContent] = useState('')
+  // Seeded from the constants above rather than a bootstrap effect: calling
+  // setState synchronously inside an effect causes cascading renders
+  // (eslint react-hooks/set-state-in-effect).
+  const [files, setFiles] = useState<StarterFile[]>(starterFiles)
+  const [tree, setTree] = useState<StarterFile[]>(starterFiles)
+  const [activeFile, setActiveFile] = useState<string | null>('main.py')
+  const [content, setContent] = useState(STARTER_CODE)
   const [transcript, setTranscript] = useState('')
   const [logs, setLogs] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
@@ -135,12 +158,15 @@ function CodeSpaceShell({
   const [viewMode, setViewMode] = useState<'all' | 'open'>('all')
   const [workspace, setWorkspace] = useState<string | null>(null)
   const [editorMode, setEditorMode] = useState<'edit' | 'run'>('edit')
-  const [lineCount, setLineCount] = useState(0)
+  const [lineCount, setLineCount] = useState(() => STARTER_CODE.split('\n').length)
   const [scrollEnd, setScrollEnd] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
-  const [activeTab, setActiveTab] = useState<string | null>(null)
-  const [openTabs, setOpenTabs] = useState<{ path: string; label: string }[]>([])
+  const [activeTab, setActiveTab] = useState<string | null>('main.py')
+  const [openTabs, setOpenTabs] = useState<{ path: string; label: string }[]>([
+    { path: 'main.py', label: 'main.py' },
+  ])
 
   // ---- Phase 3: hands-free & voice learning ----
   const [isHandsFree, setIsHandsFree] = useState(false)
@@ -186,7 +212,7 @@ function CodeSpaceShell({
   const connect = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN) return
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-    const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws`
+    const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws/process-voice`
     const ws = new WebSocket(wsUrl)
     socketRef.current = ws
     setSocket(ws)
@@ -215,6 +241,58 @@ function CodeSpaceShell({
                 break
             }
             break
+          case 'ready':
+            setVoiceStatus('ready')
+            if (Array.isArray(msg.files)) {
+              setFiles(msg.files)
+              setTree(msg.files)
+              if (msg.files.length === 0) {
+                // The starter tree is seeded on the client. Persist it so
+                // opening one of those files doesn't hit "File not found".
+                for (const file of STARTER_FILES) {
+                  if (file.kind !== 'file') continue
+                  socketRef.current?.send(
+                    JSON.stringify({
+                      type: 'write_file',
+                      path: file.path,
+                      code: file.path === 'main.py' ? STARTER_CODE : '',
+                    }),
+                  )
+                }
+              }
+            }
+            break
+          case 'turn-started':
+            setVoiceStatus('processing')
+            setAgentStatus('processing')
+            break
+          case 'waiting':
+            setVoiceStatus('processing')
+            break
+          case 'listening':
+            setVoiceStatus('ready')
+            setSttStatus('idle')
+            setAgentStatus('done')
+            setTtsStatus('idle')
+            break
+          case 'file':
+            if (typeof msg.path === 'string') {
+              const filePath = msg.path
+              setActiveFile(filePath)
+              setActiveTab(filePath)
+              setOpenTabs((prev) =>
+                prev.some((tab) => tab.path === filePath)
+                  ? prev
+                  : [
+                      ...prev,
+                      { path: filePath, label: filePath.split('/').pop() || filePath },
+                    ],
+              )
+              const fileContent = typeof msg.content === 'string' ? msg.content : ''
+              setContent(fileContent)
+              setLineCount(fileContent.split('\n').length)
+            }
+            break
           case 'transcript':
             setTranscript(msg.transcript || '')
             setVoiceStatus('ready')
@@ -230,6 +308,10 @@ function CodeSpaceShell({
             break
           case 'logs':
             setLogs((prev) => [...prev, ...(msg.logs || [])])
+            if (Array.isArray(msg.files)) {
+              setFiles(msg.files)
+              setTree(msg.files)
+            }
             setVoiceStatus('ready')
             break
           case 'speech':
@@ -245,11 +327,12 @@ function CodeSpaceShell({
                 audio.play().catch(() => {})
                 URL.revokeObjectURL(url)
               }
-              setLogs((prev) => [...prev, `{ Agent says: ${transcript || '<reply>'} }`])
+              setLogs((prev) => [...prev, `{ Agent says: ${msg.text || '<reply>'} }`])
             } catch {
               // ignore audio decode errors
             }
             setVoiceStatus('ready')
+            setAgentStatus('done')
             setTtsStatus('idle')
             break
           case 'error':
@@ -271,7 +354,9 @@ function CodeSpaceShell({
       setConnections((c) => c - 1)
       setVoiceStatus('disconnected')
     }
-  }, [transcript, voiceStatus, setVoiceStatus, setSttStatus, setAgentStatus, setTtsStatus])
+    // State setters are stable, so this effect connects once instead of
+    // reconnecting every time the voice status or transcript changes.
+  }, [setVoiceStatus, setSttStatus, setAgentStatus, setTtsStatus])
 
   useEffect(() => {
     connect()
@@ -348,42 +433,6 @@ function CodeSpaceShell({
     }
   }
 
-  // ---- Workspace bootstrap ----
-  const bootstrapWorkspace = useCallback(() => {
-    const starter = `# Leo voice agent � build your project by voice
-
-# Speak: �open main.py�, �write a hello function�, �run main.py�
-
-def hello(name=""):
-    return f"Hello, {name or 'world'}!"
-
-if __name__ == "__main__":
-    print(hello())
-
-# Add your code below this line.
-`
-    setTree([
-      { path: 'main.py', kind: 'file', name: 'main.py' },
-      { path: 'app.py', kind: 'file', name: 'app.py' },
-      { path: 'README.md', kind: 'file', name: 'README.md' },
-      { path: 'sandbox.py', kind: 'file', name: 'sandbox.py' },
-    ])
-    setFiles([
-      { path: 'main.py', kind: 'file', name: 'main.py' },
-      { path: 'app.py', kind: 'file', name: 'app.py' },
-      { path: 'README.md', kind: 'file', name: 'README.md' },
-      { path: 'sandbox.py', kind: 'file', name: 'sandbox.py' },
-    ])
-    if (!activeFile) setActiveFile('main.py')
-    if (!activeTab) setActiveTab('main.py')
-    setOpenTabs([{ path: 'main.py', label: 'main.py' }])
-    setContent(starter)
-    setLineCount(starter.split('\n').length)
-  }, [activeFile, activeTab])
-
-  useEffect(() => {
-    bootstrapWorkspace()
-  }, [bootstrapWorkspace])
   // ---- Keyboard shortcuts ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -400,10 +449,17 @@ if __name__ == "__main__":
         e.preventDefault()
         setPanelOpen(!panelOpen)
       }
+      if (mod && e.key === 'k') {
+        e.preventDefault()
+        setPaletteOpen((open) => !open)
+      }
+      if (e.key === 'Escape') {
+        setPaletteOpen(false)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activeFile, content, editorMode, panelOpen])
+  }, [activeFile, content, editorMode, panelOpen, paletteOpen])
 
   // ---- Voice recording ----
   const startRecording = async () => {
@@ -589,7 +645,7 @@ if __name__ == "__main__":
       </div>
 
       {/* ===== Command palette ===== */}
-      <CommandPalette />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       {/* ===== Context-aware prompting ===== */}
       <ContextAwarePrompting />
@@ -672,8 +728,10 @@ function CommandHints() {
   )
 }
 
-function CommandPalette() {
+function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [q, setQ] = useState('')
+
+  if (!open) return null
   const cmds = [
     { key: 'new-project', label: 'New Project', description: 'Start a fresh project' },
     { key: 'open-file', label: 'Open File', description: 'Open a file from disk' },
@@ -686,7 +744,7 @@ function CommandPalette() {
     <div className="fixed inset-0 bg-black/60 backdrop-blur z-50 flex items-center justify-center">
       <div className="relative bg-[#1e1e1e] rounded-2xl p-8 w-80 max-w-full animate-pop border border-white/10">
         <button
-          onClick={() => setQ('')}
+          onClick={onClose}
           className="absolute top-4 right-4 w-8 h-8 rounded bg-white/10 text-white/50 flex items-center justify-center hover:bg-white/20 hover:text-white transition-colors"
         >
           �
