@@ -2,9 +2,12 @@
 
 import Editor from 'react-simple-code-editor'
 
+import { highlightCode, languageForPath } from '@/lib/highlight'
+
 interface Tab {
   path: string
   label: string
+  dirty: boolean
 }
 
 interface EditorAreaProps {
@@ -16,6 +19,8 @@ interface EditorAreaProps {
   onRun: () => void
   onTabClick: (path: string) => void
   onTabClose: (path: string) => void
+  onCursorChange?: (line: number, col: number) => void
+  running?: boolean
   disabled?: boolean
 }
 
@@ -30,9 +35,21 @@ export function EditorArea({
   onRun,
   onTabClick,
   onTabClose,
+  onCursorChange,
+  running = false,
   disabled = false,
 }: EditorAreaProps) {
   const lines = content.split('\n')
+  const language = languageForPath(activeTab)
+
+  const reportCursor = (element: HTMLTextAreaElement | HTMLDivElement) => {
+    if (!onCursorChange || !(element instanceof HTMLTextAreaElement)) return
+    const position = element.selectionStart ?? 0
+    const before = element.value.slice(0, position)
+    const line = before.split('\n').length
+    const col = position - before.lastIndexOf('\n')
+    onCursorChange(line, col)
+  }
 
   return (
     <div className="ide-editor-area flex-1 min-h-0 min-w-0">
@@ -53,6 +70,9 @@ export function EditorArea({
                   <path d="M14 2v6h6" />
                 </svg>
                 <span className="truncate max-w-40">{tab.label}</span>
+                {tab.dirty && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#635bff] shrink-0" title="Unsaved changes" />
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -66,15 +86,16 @@ export function EditorArea({
               </div>
             )
           })}
+          {tabs.length === 0 && (
+            <div className="flex items-center h-full px-2 text-[11px] text-white/25">
+              No open editors
+            </div>
+          )}
         </div>
 
         <div className="ide-tabbar-actions">
-          <span
-            className={`text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${
-              disabled ? 'bg-[#635bff] text-white' : 'bg-white/5 text-white/40'
-            }`}
-          >
-            {disabled ? 'RUN' : 'EDIT'}
+          <span className="text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded bg-white/5 text-white/40">
+            {running ? 'RUNNING' : language === 'text' ? 'EDIT' : language.toUpperCase()}
           </span>
           <button
             onClick={onSave}
@@ -86,11 +107,11 @@ export function EditorArea({
           </button>
           <button
             onClick={onRun}
-            disabled={!activeTab || disabled}
+            disabled={!activeTab || disabled || running}
             className="text-xs px-2.5 py-1 rounded bg-[#3c3c3c] text-white/80 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#4a4a4a] hover:text-white transition-colors"
-            title="Run (Ctrl+Enter)"
+            title="Run in the sandbox (Ctrl+Enter)"
           >
-            Run
+            {running ? 'Running…' : 'Run'}
           </button>
         </div>
       </div>
@@ -107,7 +128,7 @@ export function EditorArea({
             <Editor
               value={content}
               onValueChange={onContentChange}
-              highlight={(code) => <code className="language-python">{code}</code>}
+              highlight={(code) => highlightCode(code, language)}
               className="react-simple-code-editor w-full"
               style={{
                 fontFamily:
@@ -121,6 +142,23 @@ export function EditorArea({
                 border: 'none',
                 background: 'transparent',
                 whiteSpace: 'pre',
+              }}
+              onKeyUp={(event) => reportCursor(event.currentTarget)}
+              onClick={(event) => reportCursor(event.currentTarget)}
+              onKeyDown={(event) => {
+                // Keep the editor's indentation consistent with Python.
+                if (event.key === 'Tab') {
+                  event.preventDefault()
+                  const target = event.currentTarget as HTMLTextAreaElement
+                  const start = target.selectionStart
+                  const end = target.selectionEnd
+                  const next = `${content.slice(0, start)}  ${content.slice(end)}`
+                  onContentChange(next)
+                  requestAnimationFrame(() => {
+                    target.selectionStart = start + 2
+                    target.selectionEnd = start + 2
+                  })
+                }
               }}
               disabled={disabled}
               textareaClassName="focus:outline-none"

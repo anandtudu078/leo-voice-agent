@@ -8,6 +8,34 @@ import { EditorArea } from './EditorArea'
 import { Panel } from './Panel'
 import { StatusBar } from './StatusBar'
 import { VoiceStatus } from './VoiceStatus'
+import { languageLabel } from '@/lib/highlight'
+import {
+  baseName,
+  listWorkspace,
+  makeWorkspaceDir,
+  readWorkspaceFile,
+  removeWorkspacePath,
+  renameWorkspacePath,
+  runWorkspaceFile,
+  writeWorkspaceFile,
+  type WorkspaceEntry,
+} from '@/lib/workspace'
+
+type EditorTab = { path: string; content: string; saved: string }
+
+function describeError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function isWithin(path: string, base: string): boolean {
+  return path === base || path.startsWith(`${base}/`)
+}
+
+function movePath(path: string, from: string, to: string): string {
+  if (path === from) return to
+  if (path.startsWith(`${from}/`)) return `${to}${path.slice(from.length)}`
+  return path
+}
 
 // ---------------------------------------------------------------------------
 // Code-space IDE � VS Code / PyCharm style shell, voice-powered.
@@ -31,8 +59,6 @@ export default function CodeSpace() {
   const [agentStatus, setAgentStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle')
   const [ttsStatus, setTtsStatus] = useState<'idle' | 'speaking' | 'error'>('idle')
 
-  const [signOutFn, setSignOutFn] = useState<(() => void) | null>(() => null)
-
   // Sync session email with backend
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -51,30 +77,16 @@ export default function CodeSpace() {
           }
         }
         setUser({ email })
-        setSignOutFn(signOutFn)
       } catch {
         setUser({ email: '' })
-        setSignOutFn(null)
       }
     })()
   }, [])
-
-  const status = useMemo(() => {
-    const map: Record<string, { label: string; css: string }> = {
-      idle: { label: 'Idle', css: 'bg-white/10 text-white/60' },
-      listening: { label: 'Listening', css: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-      processing: { label: 'Processing', css: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-      disconnected: { label: 'Disconnected', css: 'bg-red-500/20 text-red-400 border-red-500/30' },
-      ready: { label: 'Live', css: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-    }
-    return map[voiceStatus] || map.idle
-  }, [voiceStatus])
 
   return (
     <>
       <CodeSpaceShell
         user={user}
-        signOut={signOutFn}
         voiceStatus={voiceStatus}
         setVoiceStatus={setVoiceStatus}
         sttStatus={sttStatus}
@@ -91,33 +103,8 @@ export default function CodeSpace() {
 // IDE shell: holds all workspace/editor/voice state and renders the chrome.
 // ---------------------------------------------------------------------------
 
-type StarterFile = { path: string; kind: 'file' | 'dir'; name: string }
-
-const STARTER_FILES: StarterFile[] = [
-  { path: 'main.py', kind: 'file', name: 'main.py' },
-  { path: 'app.py', kind: 'file', name: 'app.py' },
-  { path: 'README.md', kind: 'file', name: 'README.md' },
-  { path: 'sandbox.py', kind: 'file', name: 'sandbox.py' },
-]
-
-const starterFiles = () => STARTER_FILES.map((file) => ({ ...file }))
-
-const STARTER_CODE = `# Leo voice agent - build your project by voice
-
-# Speak: "open main.py", "write a hello function", "run main.py"
-
-def hello(name=""):
-    return f"Hello, {name or 'world'}!"
-
-if __name__ == "__main__":
-    print(hello())
-
-# Add your code below this line.
-`
-
 function CodeSpaceShell({
   user,
-  signOut,
   voiceStatus,
   setVoiceStatus,
   sttStatus,
@@ -128,7 +115,6 @@ function CodeSpaceShell({
   setTtsStatus,
 }: {
   user: { email: string }
-  signOut: (() => void) | null
   voiceStatus: 'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'
   setVoiceStatus: (status: 'idle' | 'listening' | 'processing' | 'disconnected' | 'ready') => void
   sttStatus: 'idle' | 'listening' | 'error'
@@ -138,61 +124,35 @@ function CodeSpaceShell({
   ttsStatus: 'idle' | 'speaking' | 'error'
   setTtsStatus: (s: 'idle' | 'speaking' | 'error') => void
 }) {
-  // ---- Workspace state ----
-  // Seeded from the constants above rather than a bootstrap effect: calling
-  // setState synchronously inside an effect causes cascading renders
-  // (eslint react-hooks/set-state-in-effect).
-  const [files, setFiles] = useState<StarterFile[]>(starterFiles)
-  const [tree, setTree] = useState<StarterFile[]>(starterFiles)
-  const [activeFile, setActiveFile] = useState<string | null>('main.py')
-  const [content, setContent] = useState(STARTER_CODE)
+  // ---- Workspace state (server-backed) ----
+  const [files, setFiles] = useState<WorkspaceEntry[]>([])
+  const [tabs, setTabs] = useState<EditorTab[]>([])
+  const [activeFile, setActiveFile] = useState<string | null>(null)
   const [transcript, setTranscript] = useState('')
   const [logs, setLogs] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-  const [socket, setSocket] = useState<WebSocket | null>(null)
-  const [connections, setConnections] = useState(0)
   const [recording, setRecording] = useState(false)
-  const [viewMode, setViewMode] = useState<'all' | 'open'>('all')
-  const [workspace, setWorkspace] = useState<string | null>(null)
-  const [editorMode, setEditorMode] = useState<'edit' | 'run'>('edit')
-  const [lineCount, setLineCount] = useState(() => STARTER_CODE.split('\n').length)
-  const [scrollEnd, setScrollEnd] = useState(false)
+  const [loadingTree, setLoadingTree] = useState(true)
+  const [offline, setOffline] = useState(false)
+  const [runningPath, setRunningPath] = useState<string | null>(null)
+  const [cursor, setCursor] = useState({ line: 1, col: 1 })
   const [panelOpen, setPanelOpen] = useState(true)
   const [activeView, setActiveView] = useState('explorer')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showSuggestion, setShowSuggestion] = useState(true)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
-  const [activeTab, setActiveTab] = useState<string | null>('main.py')
-  const [openTabs, setOpenTabs] = useState<{ path: string; label: string }[]>([
-    { path: 'main.py', label: 'main.py' },
-  ])
 
-  // ---- Phase 3: hands-free & voice learning ----
-  const [isHandsFree, setIsHandsFree] = useState(false)
-  const [lastActiveFile, setLastActiveFile] = useState<string | null>(null)
-  const [voiceHistoryMemory, setVoiceHistoryMemory] = useState<Array<{ transcript: string; timestamp: number }>>([])
-  const [focusedFile, setFocusedFile] = useState<string | null>(null)
-  const [recentFiles, setRecentFiles] = useState<Array<{ path: string; openedAt: number }>>([])
-  const [executionResults, setExecutionResults] = useState<
-    Array<{
-      id: string
-      type: 'test' | 'output' | 'error' | 'tts'
-      content: string
-      timestamp: number
-      passed?: boolean
-      executable?: boolean
-    }>
-  >([])
-  const [commandFrequency, setCommandFrequency] = useState<Map<string, number>>(new Map())
-
-  const trackCommand = (command: string) => {
-    setCommandFrequency((prev) => {
-      const next = new Map(prev)
-      next.set(command, (next.get(command) || 0) + 1)
-      return next
-    })
-  }
+  const activeTab = activeFile
+  const activeContent = tabs.find((tab) => tab.path === activeFile)?.content ?? ''
+  const openTabs = tabs.map((tab) => ({
+    path: tab.path,
+    label: baseName(tab.path),
+    dirty: tab.content !== tab.saved,
+  }))
+  const dirtyPaths = tabs
+    .filter((tab) => tab.content !== tab.saved)
+    .map((tab) => tab.path)
 
   const socketRef = useRef<WebSocket | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -210,6 +170,49 @@ function CodeSpaceShell({
     return map[voiceStatus] || map.idle
   }, [voiceStatus])
 
+  // ---- Helpers shared by the HTTP file API and the voice socket ----
+  const pushLog = useCallback((line: string) => {
+    setLogs((prev) => [...prev.slice(-499), line])
+  }, [])
+
+  const adoptFile = useCallback((path: string, content: string) => {
+    setTabs((prev) =>
+      prev.some((tab) => tab.path === path)
+        ? prev.map((tab) => (tab.path === path ? { ...tab, content, saved: content } : tab))
+        : [...prev, { path, content, saved: content }],
+    )
+    setActiveFile(path)
+    setCursor({ line: 1, col: 1 })
+  }, [])
+
+  const refreshTree = useCallback(async () => {
+    try {
+      setFiles(await listWorkspace())
+      setOffline(false)
+    } catch {
+      setOffline(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void listWorkspace()
+      .then((entries) => {
+        if (cancelled) return
+        setFiles(entries)
+        setOffline(false)
+      })
+      .catch(() => {
+        if (!cancelled) setOffline(true)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTree(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // ---- WebSocket connection ----
   const connect = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN) return
@@ -217,8 +220,6 @@ function CodeSpaceShell({
     const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws/process-voice`
     const ws = new WebSocket(wsUrl)
     socketRef.current = ws
-    setSocket(ws)
-    setConnections((c) => c + 1)
 
     ws.onopen = () => setVoiceStatus('ready')
     ws.onmessage = (event) => {
@@ -245,24 +246,7 @@ function CodeSpaceShell({
             break
           case 'ready':
             setVoiceStatus('ready')
-            if (Array.isArray(msg.files)) {
-              setFiles(msg.files)
-              setTree(msg.files)
-              if (msg.files.length === 0) {
-                // The starter tree is seeded on the client. Persist it so
-                // opening one of those files doesn't hit "File not found".
-                for (const file of STARTER_FILES) {
-                  if (file.kind !== 'file') continue
-                  socketRef.current?.send(
-                    JSON.stringify({
-                      type: 'write_file',
-                      path: file.path,
-                      code: file.path === 'main.py' ? STARTER_CODE : '',
-                    }),
-                  )
-                }
-              }
-            }
+            if (Array.isArray(msg.files)) setFiles(msg.files)
             break
           case 'turn-started':
             setVoiceStatus('processing')
@@ -278,21 +262,8 @@ function CodeSpaceShell({
             setTtsStatus('idle')
             break
           case 'file':
-            if (typeof msg.path === 'string') {
-              const filePath = msg.path
-              setActiveFile(filePath)
-              setActiveTab(filePath)
-              setOpenTabs((prev) =>
-                prev.some((tab) => tab.path === filePath)
-                  ? prev
-                  : [
-                      ...prev,
-                      { path: filePath, label: filePath.split('/').pop() || filePath },
-                    ],
-              )
-              const fileContent = typeof msg.content === 'string' ? msg.content : ''
-              setContent(fileContent)
-              setLineCount(fileContent.split('\n').length)
+            if (typeof msg.path === 'string' && msg.path) {
+              adoptFile(msg.path, typeof msg.content === 'string' ? msg.content : '')
             }
             break
           case 'transcript':
@@ -310,10 +281,7 @@ function CodeSpaceShell({
             break
           case 'logs':
             setLogs((prev) => [...prev, ...(msg.logs || [])])
-            if (Array.isArray(msg.files)) {
-              setFiles(msg.files)
-              setTree(msg.files)
-            }
+            if (Array.isArray(msg.files)) setFiles(msg.files)
             setVoiceStatus('ready')
             break
           case 'speech':
@@ -348,12 +316,10 @@ function CodeSpaceShell({
     }
 
     ws.onclose = () => {
-      setConnections((c) => c - 1)
       setVoiceStatus('idle')
     }
 
     ws.onerror = () => {
-      setConnections((c) => c - 1)
       setVoiceStatus('disconnected')
     }
     // State setters are stable, so this effect connects once instead of
@@ -368,72 +334,141 @@ function CodeSpaceShell({
       streamRef.current?.getTracks().forEach((track) => track.stop())
     }
   }, [connect])
-  // ---- File operations ----
-  const openFile = (path: string) => {
-    setActiveFile(path)
-    setActiveTab(path)
-    if (!openTabs.some((t) => t.path === path)) {
-      setOpenTabs((prev) => [...prev, { path, label: path.split('/').pop() || path }])
+  // ---- File operations (HTTP workspace API) ----
+  const openFile = async (path: string) => {
+    if (tabs.some((tab) => tab.path === path)) {
+      setActiveFile(path)
+      return
     }
-    setRecentFiles((prev) => {
-      const next = prev.filter((f) => f.path !== path)
-      return [{ path, openedAt: Date.now() }, ...next].slice(0, 10)
-    })
-    const msg = { type: 'read_file', path }
-    socketRef.current?.send(JSON.stringify(msg))
-  }
-
-  const createFile = (name: string) => {
-    setActiveFile(name)
-    setActiveTab(name)
-    if (!openTabs.some((t) => t.path === name)) {
-      setOpenTabs((prev) => [...prev, { path: name, label: name.split('/').pop() || name }])
+    try {
+      const fileContent = await readWorkspaceFile(path)
+      setOffline(false)
+      setTabs((prev) =>
+        prev.some((tab) => tab.path === path)
+          ? prev
+          : [...prev, { path, content: fileContent, saved: fileContent }],
+      )
+      setActiveFile(path)
+      setCursor({ line: 1, col: 1 })
+    } catch (err) {
+      pushLog(`ERROR: cannot open ${path} — ${describeError(err)}`)
     }
-    const msg = { type: 'create_file', path: name, code: '' }
-    socketRef.current?.send(JSON.stringify(msg))
-    setLogs((prev) => [...prev, `> Created ${name}`])
   }
 
-  const deleteFile = (path: string) => {
-    const msg = { type: 'delete_file', path }
-    socketRef.current?.send(JSON.stringify(msg))
-    setTree((prev) => prev.filter((f) => f.path !== path))
-    setFiles((prev) => prev.filter((f) => f.path !== path))
-    setOpenTabs((prev) => prev.filter((t) => t.path !== path))
-    if (activeFile === path) setActiveFile(null)
-    if (activeTab === path) setActiveTab(null)
+  const createFile = async (dir = '') => {
+    const suggested = dir ? `${dir}/untitled.py` : 'untitled.py'
+    const path = window.prompt('New file path', suggested)?.trim()
+    if (!path) return
+    try {
+      setFiles(await writeWorkspaceFile(path, ''))
+      setOffline(false)
+      pushLog(`> Created ${path}`)
+      await openFile(path)
+    } catch (err) {
+      pushLog(`ERROR: could not create ${path} — ${describeError(err)}`)
+    }
   }
 
-  const saveFile = (code: string) => {
+  const createFolder = async (dir = '') => {
+    const suggested = dir ? `${dir}/new-folder` : 'new-folder'
+    const path = window.prompt('New folder path', suggested)?.trim()
+    if (!path) return
+    try {
+      setFiles(await makeWorkspaceDir(path))
+      setOffline(false)
+      pushLog(`> Created folder ${path}`)
+    } catch (err) {
+      pushLog(`ERROR: could not create folder ${path} — ${describeError(err)}`)
+    }
+  }
+
+  const deleteEntry = async (path: string) => {
+    if (!window.confirm(`Delete ${baseName(path)}? This cannot be undone.`)) return
+    try {
+      setFiles(await removeWorkspacePath(path))
+      setOffline(false)
+      const remaining = tabs.filter((tab) => !isWithin(tab.path, path))
+      setTabs(remaining)
+      if (activeFile && isWithin(activeFile, path)) {
+        setActiveFile(remaining.length ? remaining[remaining.length - 1].path : null)
+      }
+      pushLog(`> Deleted ${path}`)
+    } catch (err) {
+      pushLog(`ERROR: could not delete ${path} — ${describeError(err)}`)
+    }
+  }
+
+  const saveFile = async (): Promise<boolean> => {
+    const tab = tabs.find((item) => item.path === activeFile)
+    if (!tab) return false
+    if (tab.content === tab.saved) return true
+    try {
+      setFiles(await writeWorkspaceFile(tab.path, tab.content))
+      setOffline(false)
+      setTabs((prev) =>
+        prev.map((item) => (item.path === tab.path ? { ...item, saved: item.content } : item)),
+      )
+      pushLog(`> Saved ${tab.path}`)
+      return true
+    } catch (err) {
+      pushLog(`ERROR: could not save ${tab.path} — ${describeError(err)}`)
+      return false
+    }
+  }
+
+  const runFile = async (target: string | null = activeFile) => {
+    if (!target) return
+    setPanelOpen(true)
+    setPanelTab('terminal')
+    const tab = tabs.find((item) => item.path === target)
+    if (tab && tab.content !== tab.saved) {
+      const saved = await saveFile()
+      if (!saved) return
+    }
+    pushLog(`$ leo run ${target}`)
+    setRunningPath(target)
+    try {
+      const result = await runWorkspaceFile(target)
+      setOffline(false)
+      pushLog(result.output || '(no output)')
+      pushLog(result.ok ? `> Finished ${target}` : `ERROR: ${target} exited with an error`)
+    } catch (err) {
+      pushLog(`ERROR: could not run ${target} — ${describeError(err)}`)
+    } finally {
+      setRunningPath(null)
+    }
+  }
+
+  const renameEntry = async (path: string) => {
+    const next = window.prompt('Rename or move to', path)?.trim()
+    if (!next || next === path) return
+    try {
+      setFiles(await renameWorkspacePath(path, next))
+      setOffline(false)
+      setTabs((prev) => prev.map((tab) => ({ ...tab, path: movePath(tab.path, path, next) })))
+      setActiveFile((prev) => (prev ? movePath(prev, path, next) : prev))
+      pushLog(`> Renamed ${path} to ${next}`)
+    } catch (err) {
+      pushLog(`ERROR: could not rename ${path} — ${describeError(err)}`)
+    }
+  }
+
+  const updateContent = (code: string) => {
     if (!activeFile) return
-    const msg = { type: 'write_file', path: activeFile, code }
-    socketRef.current?.send(JSON.stringify(msg))
-    setLogs((prev) => [...prev, `> Saved ${activeFile}`])
-  }
-
-  const runFile = (path: string) => {
-    if (!content) return
-    const scriptPath = path || 'snippet.py'
-    socketRef.current?.send(JSON.stringify({
-      type: 'write_file',
-      path: scriptPath,
-      code: content,
-    }))
-    setLogs((prev) => [...prev, `> Saved ${scriptPath}`])
-    socketRef.current?.send(JSON.stringify({
-      type: 'run_script',
-      path: scriptPath,
-    }))
-    setLogs((prev) => [...prev, `> Running ${scriptPath}`])
-    setVoiceStatus('listening')
+    setTabs((prev) =>
+      prev.map((tab) => (tab.path === activeFile ? { ...tab, content: code } : tab)),
+    )
   }
 
   const closeTab = (path: string) => {
-    setOpenTabs((prev) => prev.filter((t) => t.path !== path))
-    if (activeTab === path) {
-      const remaining = openTabs.filter((t) => t.path !== path)
-      setActiveTab(remaining.length > 0 ? remaining[0].path : null)
-      setActiveFile(remaining.length > 0 ? remaining[0].path : null)
+    const tab = tabs.find((item) => item.path === path)
+    if (tab && tab.content !== tab.saved && !window.confirm(`Close ${baseName(path)} and discard changes?`)) {
+      return
+    }
+    const remaining = tabs.filter((item) => item.path !== path)
+    setTabs(remaining)
+    if (activeFile === path) {
+      setActiveFile(remaining.length ? remaining[remaining.length - 1].path : null)
     }
   }
 
@@ -443,11 +478,11 @@ function CodeSpaceShell({
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key === 's') {
         e.preventDefault()
-        if (activeFile) saveFile(content)
+        void saveFile()
       }
       if (mod && e.key === 'Enter') {
         e.preventDefault()
-        if (activeFile && editorMode === 'edit') runFile(activeFile)
+        void runFile()
       }
       if (mod && e.key === 'j') {
         e.preventDefault()
@@ -463,7 +498,7 @@ function CodeSpaceShell({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activeFile, content, editorMode, panelOpen, paletteOpen])
+  }, [activeFile, tabs, panelOpen, paletteOpen])
 
   // ---- Voice recording ----
   const startRecording = async () => {
@@ -531,8 +566,8 @@ function CodeSpaceShell({
     else void startRecording()
   }
 
-  const fileCount = tree.filter((f) => f.kind === 'file').length
-  const dirCount = tree.filter((f) => f.kind === 'dir').length
+  const fileCount = files.filter((entry) => entry.kind === 'file').length
+  const dirCount = files.filter((entry) => entry.kind === 'dir').length
   return (
     <main className="h-screen w-screen overflow-hidden flex flex-col bg-[#1e1e1e] text-white">
       {/* ===== Title bar ===== */}
@@ -552,6 +587,11 @@ function CodeSpaceShell({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          {offline && (
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30" title="Backend unreachable — the explorer is read-only">
+              offline
+            </span>
+          )}
           <PipelineVisualizer
             sttStatus={sttStatus}
             agentStatus={agentStatus}
@@ -574,25 +614,21 @@ function CodeSpaceShell({
             </svg>
             {recording ? 'Stop & send' : 'Speak'}
           </button>
-          <button
-            onClick={() => setIsHandsFree((value) => !value)}
-            className={`hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
-              isHandsFree
-                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-                : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white'
-            }`}
-            title="Toggle hands-free listening"
-          >
-            Hands-free
-          </button>
           {user.email && (
             <span className="hidden lg:inline text-[11px] text-white/40 truncate max-w-40" title={user.email}>
               {user.email}
             </span>
           )}
-          {signOut && (
+          {user.email && (
             <button
-              onClick={signOut}
+              onClick={async () => {
+                try {
+                  await fetch('/api/auth/signout', { method: 'POST', credentials: 'include' })
+                } catch {
+                  // The cookie may already be gone; leave the workspace anyway.
+                }
+                window.location.href = '/'
+              }}
               className="text-xs px-2.5 py-1 rounded bg-white/5 text-white/60 border border-white/10 hover:bg-white/10 hover:text-white transition-colors"
             >
               Sign out
@@ -615,9 +651,16 @@ function CodeSpaceShell({
           <SideBar
             files={files}
             activeFile={activeFile}
-            onOpenFile={openFile}
-            onCreateFile={() => createFile('untitled')}
+            dirtyPaths={dirtyPaths}
             view={activeView}
+            loading={loadingTree}
+            offline={offline}
+            onOpenFile={(path) => void openFile(path)}
+            onCreateFile={(dir) => void createFile(dir)}
+            onCreateFolder={(dir) => void createFolder(dir)}
+            onRename={(path) => void renameEntry(path)}
+            onDelete={(path) => void deleteEntry(path)}
+            onRefresh={() => void refreshTree()}
             onToggle={() => setSidebarOpen(false)}
             onSelectView={setActiveView}
           />
@@ -627,16 +670,14 @@ function CodeSpaceShell({
           <EditorArea
             tabs={openTabs}
             activeTab={activeTab}
-            content={content}
-            onContentChange={(code) => {
-              setContent(code)
-              setLineCount(code.split('\n').length)
-            }}
-            onSave={() => saveFile(content)}
-            onRun={() => runFile(activeFile || '')}
-            onTabClick={openFile}
+            content={activeContent}
+            onContentChange={updateContent}
+            onSave={() => void saveFile()}
+            onRun={() => void runFile()}
+            onTabClick={(path) => void openFile(path)}
             onTabClose={closeTab}
-            disabled={editorMode === 'run'}
+            onCursorChange={(line, col) => setCursor({ line, col })}
+            running={runningPath === activeFile}
           />
 
           <Panel
@@ -731,13 +772,69 @@ function CodeSpaceShell({
         voiceStatus={voiceStatus}
         branch="main"
         encoding="UTF-8"
-        lineCol={`Ln ${lineCount}, Col 1`}
+        lineCol={`Ln ${cursor.line}, Col ${cursor.col} · ${languageLabel(activeFile)}`}
         recording={recording}
         onVoiceToggle={toggleRecording}
       />
 
       {showSuggestion && <ContextAwarePrompting onClose={() => setShowSuggestion(false)} />}
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={[
+          {
+            key: 'new-file',
+            label: 'New File',
+            description: 'Create a file in your workspace',
+            run: () => void createFile(''),
+          },
+          {
+            key: 'new-folder',
+            label: 'New Folder',
+            description: 'Create a folder in your workspace',
+            run: () => void createFolder(''),
+          },
+          {
+            key: 'save',
+            label: 'Save File',
+            description: 'Save the active file (Ctrl+S)',
+            run: () => void saveFile(),
+          },
+          {
+            key: 'run',
+            label: 'Run File',
+            description: 'Run the active file in the sandbox (Ctrl+Enter)',
+            run: () => void runFile(),
+          },
+          {
+            key: 'refresh',
+            label: 'Refresh Explorer',
+            description: 'Reload the file tree from the server',
+            run: () => void refreshTree(),
+          },
+          {
+            key: 'toggle-panel',
+            label: 'Toggle Panel',
+            description: 'Show or hide the terminal panel (Ctrl+J)',
+            run: () => setPanelOpen((open) => !open),
+          },
+          {
+            key: 'toggle-sidebar',
+            label: 'Toggle Sidebar',
+            description: 'Show or hide the explorer',
+            run: () => setSidebarOpen((open) => !open),
+          },
+          {
+            key: 'terminal',
+            label: 'Show Terminal',
+            description: 'Open the sandbox terminal output',
+            run: () => {
+              setPanelOpen(true)
+              setPanelTab('terminal')
+            },
+          },
+        ]}
+      />
     </main>
   )
 }
@@ -817,17 +914,28 @@ function CommandHints() {
   )
 }
 
-function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+type PaletteCommand = {
+  key: string
+  label: string
+  description: string
+  run: () => void
+}
+
+function CommandPalette({
+  open,
+  onClose,
+  commands,
+}: {
+  open: boolean
+  onClose: () => void
+  commands: PaletteCommand[]
+}) {
   const [q, setQ] = useState('')
 
   if (!open) return null
-  const cmds = [
-    { key: 'new-project', label: 'New Project', description: 'Start a fresh project' },
-    { key: 'open-file', label: 'Open File', description: 'Open a file from disk' },
-    { key: 'refactor', label: 'Refactor Code', description: 'Auto-refactor selected code' },
-    { key: 'debug', label: 'Debug', description: 'Run debugger on current file' },
-    { key: 'terminal', label: 'New Terminal', description: 'Open terminal at project root' },
-  ]
+  const matches = commands.filter((command) =>
+    command.label.toLowerCase().includes(q.trim().toLowerCase()),
+  )
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur z-50 flex items-center justify-center">
@@ -835,28 +943,38 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
         <button
           onClick={onClose}
           className="absolute top-4 right-4 w-8 h-8 rounded bg-white/10 text-white/50 flex items-center justify-center hover:bg-white/20 hover:text-white transition-colors"
+          aria-label="Close command palette"
         >
-          �
+          ×
         </button>
         <h3 className="text-lg mb-6 text-center text-white">Command Palette</h3>
         <input
+          autoFocus
           onChange={(e) => setQ(e.target.value)}
           value={q}
-          className="w-full bg-[#252526] border border-white/10 rounded p-2 pl-12 focus:bg-[#3c3c3c] focus:border-[#635bff] focus:text-white placeholder-white/30 transition-colors"
+          className="w-full bg-[#252526] border border-white/10 rounded p-2 pl-3 focus:bg-[#3c3c3c] focus:border-[#635bff] focus:text-white placeholder-white/30 transition-colors"
           placeholder="Type a command..."
         />
-        <div className="mt-6 space-y-3 max-h-80 overflow-y-auto">
-          {cmds
-            .filter((c) => c.label.toLowerCase().includes(q.toLowerCase()))
-            .map((c) => (
-              <div key={c.key} className="flex items-center gap-3 p-3 rounded hover:bg-white/5 cursor-pointer transition-colors">
-                <span className="w-1.5 h-1.5 bg-[#635bff] rounded-full animate-pulse" />
-                <div>
-                  <p className="font-medium text-white">{c.label}</p>
-                  <p className="text-xs text-white/40">{c.description}</p>
-                </div>
-              </div>
-            ))}
+        <div className="mt-4 space-y-1 max-h-80 overflow-y-auto">
+          {matches.map((command) => (
+            <button
+              key={command.key}
+              onClick={() => {
+                onClose()
+                command.run()
+              }}
+              className="w-full flex items-center gap-3 p-3 rounded text-left hover:bg-white/5 transition-colors"
+            >
+              <span className="w-1.5 h-1.5 bg-[#635bff] rounded-full shrink-0" />
+              <span className="min-w-0">
+                <span className="block font-medium text-white text-sm">{command.label}</span>
+                <span className="block text-xs text-white/40">{command.description}</span>
+              </span>
+            </button>
+          ))}
+          {matches.length === 0 && (
+            <p className="p-3 text-xs text-white/30">No matching command.</p>
+          )}
         </div>
         <CommandHints />
       </div>

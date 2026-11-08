@@ -58,10 +58,32 @@ class SandboxExecutor:
         return str(resolved)
 
     def remove(self, workspace: Path, path: str) -> None:
-        """Delete a file inside the workspace."""
+        """Delete a file or directory inside the workspace."""
+        import shutil
+
         resolved = self._resolve(workspace, path)
-        if resolved.is_file():
+        if resolved.is_dir():
+            shutil.rmtree(resolved)
+        elif resolved.is_file():
             resolved.unlink()
+
+    def make_dir(self, workspace: Path, path: str) -> str:
+        """Create a directory inside the workspace and return its path."""
+        resolved = self._resolve(workspace, path)
+        resolved.mkdir(parents=True, exist_ok=True)
+        return str(resolved)
+
+    def rename(self, workspace: Path, path: str, new_path: str) -> str:
+        """Move a file or directory inside the workspace."""
+        source = self._resolve(workspace, path)
+        target = self._resolve(workspace, new_path)
+        if not source.exists():
+            raise SandboxExecutionError(f"Path not found: {path}")
+        if target.exists():
+            raise SandboxExecutionError(f"Path already exists: {new_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)
+        return str(target)
 
     def run(self, workspace: Path, script_path: str, args: list[str] | None = None) -> str:
         """Execute a script within the workspace in a fresh subprocess.

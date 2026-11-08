@@ -369,16 +369,24 @@ def _websocket_session(websocket: WebSocket) -> dict | None:
     return _decode_session(token) if token else None
 
 
+IGNORED_WORKSPACE_NAMES = {".git", "node_modules", "__pycache__", ".venv", ".next"}
+
+
 def _workspace_files(workspace: Path) -> list[dict]:
-    """List the workspace files as {"path", "name", "kind"} entries."""
+    """List workspace entries (directories and files) as ``path``/``name``/``kind``."""
     entries: list[dict] = []
     for path in sorted(workspace.rglob("*")):
-        if not path.is_file():
+        relative = path.relative_to(workspace)
+        if any(part in IGNORED_WORKSPACE_NAMES for part in relative.parts):
             continue
         entries.append(
-            {"path": path.relative_to(workspace).as_posix(), "name": path.name, "kind": "file"}
+            {
+                "path": relative.as_posix(),
+                "name": path.name,
+                "kind": "dir" if path.is_dir() else "file",
+            }
         )
-        if len(entries) >= 200:
+        if len(entries) >= 500:
             break
     return entries
 
@@ -595,14 +603,57 @@ async def websocket_process_voice(websocket: WebSocket):
                     }
                 )
 
+            elif msg_type == "mkdir":
+                try:
+                    workspace_executor.make_dir(workspace, path)
+                except SandboxExecutionError as exc:
+                    await websocket.send_json({"type": "error", "error": str(exc)})
+                    continue
+                await websocket.send_json(
+                    {
+                        "type": "logs",
+                        "logs": [f"> Created folder {path}"],
+                        "files": _workspace_files(workspace),
+                    }
+                )
+
+            elif msg_type == "rename_file":
+                new_path = str(payload.get("new_path") or "")
+                try:
+                    workspace_executor.rename(workspace, path, new_path)
+                except SandboxExecutionError as exc:
+                    await websocket.send_json({"type": "error", "error": str(exc)})
+                    continue
+                if workspace_id is not None and path:
+                    await asyncio.to_thread(
+                        repository.delete_file_snapshot, workspace_id, path
+                    )
+                await websocket.send_json(
+                    {
+                        "type": "logs",
+                        "logs": [f"> Renamed {path} to {new_path}"],
+                        "files": _workspace_files(workspace),
+                    }
+                )
+
             elif msg_type == "run_script":
                 try:
                     output = await asyncio.to_thread(workspace_executor.run, workspace, path)
                 except SandboxExecutionError as exc:
-                    await websocket.send_json({"type": "logs", "logs": [str(exc)]})
+                    await websocket.send_json(
+                        {
+                            "type": "logs",
+                            "logs": [str(exc)],
+                            "run": {"path": path, "ok": False, "output": str(exc)},
+                        }
+                    )
                     continue
                 await websocket.send_json(
-                    {"type": "logs", "logs": [output.strip() or f"> {path} finished with no output"]}
+                    {
+                        "type": "logs",
+                        "logs": [output.strip() or f"> {path} finished with no output"],
+                        "run": {"path": path, "ok": True, "output": output},
+                    }
                 )
 
             else:
@@ -862,6 +913,88 @@ async def rm_file(request: Request, path: str = Body(..., embed=True, descriptio
     elif target.is_file():
         target.unlink()
     return {"path": str(target), "removed": True}
+
+
+# ---------------------------------------------------------------------------
+# File editing endpoints used by the IDE (HTTP fallback / primary path)
+# ---------------------------------------------------------------------------
+
+
+class FileWriteRequest(BaseModel):
+    path: str
+    code: str = ""
+
+
+class FileRenameRequest(BaseModel):
+    path: str
+    new_path: str
+
+
+class FileRunRequest(BaseModel):
+    path: str
+
+
+@app.get("/api/files/tree")
+async def file_tree(request: Request):
+    """Return every file and directory in the caller's workspace."""
+    workspace, _ = await _workspace_context(request.state.session)
+    return {"files": _workspace_files(workspace)}
+
+
+@app.get("/api/files/read")
+async def read_file_endpoint(request: Request, path: str):
+    """Return the text content of a workspace file."""
+    workspace, _ = await _workspace_context(request.state.session)
+    try:
+        content = workspace_executor.read(workspace, path)
+    except SandboxExecutionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"path": path, "content": content}
+
+
+@app.post("/api/files/write")
+async def write_file_endpoint(request: Request, payload: FileWriteRequest):
+    """Create or overwrite a workspace file and snapshot it in the database."""
+    workspace, workspace_id = await _workspace_context(request.state.session)
+    if not payload.path.strip():
+        raise HTTPException(status_code=400, detail="path is required")
+    try:
+        saved = workspace_executor.write(workspace, payload.path, payload.code)
+    except SandboxExecutionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if workspace_id is not None:
+        await asyncio.to_thread(
+            repository.save_file_snapshot, workspace_id, payload.path, payload.code
+        )
+    return {"path": payload.path, "saved": saved, "files": _workspace_files(workspace)}
+
+
+@app.post("/api/files/rename")
+async def rename_file_endpoint(request: Request, payload: FileRenameRequest):
+    """Rename or move a file/directory inside the workspace."""
+    workspace, workspace_id = await _workspace_context(request.state.session)
+    try:
+        workspace_executor.rename(workspace, payload.path, payload.new_path)
+    except SandboxExecutionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if workspace_id is not None:
+        await asyncio.to_thread(
+            repository.delete_file_snapshot, workspace_id, payload.path
+        )
+    return {"path": payload.new_path, "files": _workspace_files(workspace)}
+
+
+@app.post("/api/files/run")
+async def run_file_endpoint(request: Request, payload: FileRunRequest):
+    """Run a workspace script in the sandbox and return its output."""
+    workspace, _ = await _workspace_context(request.state.session)
+    try:
+        output = await asyncio.to_thread(
+            workspace_executor.run, workspace, payload.path
+        )
+    except SandboxExecutionError as exc:
+        return {"path": payload.path, "ok": False, "output": str(exc)}
+    return {"path": payload.path, "ok": True, "output": output}
 
 
 # ---------------------------------------------------------------------------

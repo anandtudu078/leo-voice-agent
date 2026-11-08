@@ -353,3 +353,58 @@ body {
 .ide-statusbar .ide-spacer {
   flex: 1;
 }
+
+/* File tree rows */
+.ide-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--ide-text);
+  user-select: none;
+  white-space: nowrap;
+}
+.ide-tree-row:hover {
+  background: #2a2d2e;
+}
+.ide-tree-row.active {
+  background: rgba(99, 91, 255, 0.18);
+  box-shadow: inset 2px 0 0 var(--ide-accent);
+}
+.ide-tree-actions {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.ide-tree-row:hover .ide-tree-actions,
+.ide-tree-row.active .ide-tree-actions {
+  opacity: 1;
+}
+.ide-tree-action {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.ide-tree-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* Editor syntax tokens */
+.syn-comment { color: #6a9955; }
+.syn-keyword { color: #c586c0; }
+.syn-string { color: #ce9178; }
+.syn-number { color: #b5cea8; }
+.syn-function { color: #dcdcaa; }
+
+.ide-editor-pane textarea {
+  caret-color: #ffffff;
+}
+.ide-editor-pane textarea::selection {
+  background: rgba(99, 91, 255, 0.35);
+}
