@@ -34,7 +34,7 @@ load_dotenv()
 # Imported after load_dotenv() so a DATABASE_URL from .env is picked up when
 # the engine is created.
 import repository
-from db import init_db
+from db import init_db, ping_database
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +141,13 @@ app.add_middleware(
 # Create missing tables on import so a fresh clone and the test suite work
 # without a separate migration step.
 init_db()
+
+
+@app.get("/api/health")
+async def health():
+    """Liveness probe for Render (and any uptime monitor)."""
+    database_ok = await asyncio.to_thread(ping_database)
+    return {"status": "ok", "database": "connected" if database_ok else "unavailable"}
 
 
 @app.middleware("http")

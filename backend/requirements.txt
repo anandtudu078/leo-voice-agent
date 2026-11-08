@@ -1,7 +1,10 @@
 fastapi
-uvicorn
+# [standard] pulls in websockets, which the /ws/* endpoints require.
+uvicorn[standard]
 requests
 python-dotenv
 pydantic
 google-genai
 python-multipart
+sqlalchemy>=2.0
+psycopg[binary]>=3.2
