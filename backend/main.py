@@ -833,6 +833,44 @@ async def list_files(request: Request, directory: str = ""):
     for p in sorted(target.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
         rel = p.relative_to(root).as_posix()
         if p.is_dir():
+# ---------------------------------------------------------------------------
+# File management endpoints
+
+
+@app.post("/api/files/mkdir")
+async def mkdir_file(request: Request, path: str = Body(..., description="Directory path to create")):
+    """Create a new directory in the user's workspace."""
+    workspace, _ = await _workspace_context(request.state.session)
+    root = workspace.resolve()
+    target = (root / path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return {"error": "Access denied"}
+    if not target.exists():
+        target.mkdir(parents=True, exist_ok=True)
+    return {"path": str(target), "created": True}
+
+
+@app.post("/api/files/rm")
+async def rm_file(request: Request, path: str = Body(..., description="File or directory path to remove")):
+    """Remove a file or directory from the user's workspace."""
+    workspace, _ = await _workspace_context(request.state.session)
+    root = workspace.resolve()
+    target = (root / path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return {"error": "Access denied"}
+    if target.is_dir():
+        import shutil
+        shutil.rmtree(target)
+    elif target.is_file():
+        target.unlink()
+    return {"path": str(target), "removed": True}
+
+
+# ---------------------------------------------------------------------------
             directories.append(rel + "/")
         else:
             try:
