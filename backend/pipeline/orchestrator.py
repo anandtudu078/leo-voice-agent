@@ -32,7 +32,7 @@ import requests
 from .errors import OrchestratorError
 
 EVON_URL = os.getenv("EVON_URL", "https://api.vachana.ai/evon/v1")
-EVON_API_KEY = os.getenv("GNANI_API_KEY")
+EVON_API_KEY = os.getenv("EVON_API_KEY", "") or None
 
 
 def build_system_instruction() -> str:
@@ -75,7 +75,7 @@ def plan_from_transcript(transcript: str, tools: list[dict]) -> dict:
         "system_instruction": build_system_instruction(),
     }
 
-    if EVON_API_KEY:
+    if EVON_API_KEY is not None:
         try:
             response = requests.post(
                 EVON_URL,

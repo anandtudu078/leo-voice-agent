@@ -1,9 +1,18 @@
 """Tests for the Gnani STT client error handling."""
 
+import os
 import unittest
 from unittest.mock import patch
 
 from pipeline.stt import GnaniSTTClient, GnaniSTTError
+
+# Ensure the test environment has no GNANI_API_KEY before the suite runs.
+os.environ.pop("GNANI_API_KEY", None)
+
+# Also clear the cached module-level value in pipeline.stt (it was captured
+# when main.py imported it at import time).
+pipeline_stt = __import__("pipeline.stt", fromlist=["GNANI_API_KEY"])
+pipeline_stt.GNANI_API_KEY = None
 
 
 class TestGnaniSTTClient(unittest.TestCase):
@@ -45,6 +54,8 @@ class TestGnaniSTTClient(unittest.TestCase):
 
     def test_no_api_key(self):
         # The client requires an API key at construction time.
+        # When no key is passed, the constructor checks the environment
+        # variable and raises GnaniSTTError if it is not set.
         with self.assertRaises(GnaniSTTError):
             GnaniSTTClient(api_key=None)
 
