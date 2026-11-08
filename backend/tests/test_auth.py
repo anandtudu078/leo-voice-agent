@@ -1,8 +1,9 @@
 """Tests for the public authentication endpoint.
 
-The project has no database yet, so sign-in is a demo: any well-formed email
-is a valid account. The endpoint returns a signed `freebuff_session` cookie
-and a JSON body whose session is mirrored into localStorage by the frontend.
+Sign-in is still a demo: any well-formed email is accepted, though each one
+creates (or reuses) a database user. The endpoint returns a signed
+`freebuff_session` cookie and a JSON body whose session is mirrored into
+localStorage by the frontend.
 """
 
 import json
