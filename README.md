@@ -214,12 +214,32 @@ If the service already exists, fix it in **Settings**:
 | Language / Runtime | `Python 3` |
 | Root Directory | `backend` |
 | Build Command | `pip install -r requirements.txt` |
-| Start Command | `uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| Start Command | `python -m uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | Health Check Path | `/api/health` |
+
+`python -m uvicorn` is used instead of bare `uvicorn`: it always resolves the
+server from the Python that has the dependencies installed, so a service whose
+runtime `PATH` does not include the virtualenv's `bin` still starts. Bare
+`uvicorn` in that situation fails with `bash: uvicorn: command not found`.
+
+If the service's **Root Directory** is left blank (the repository root), the
+dashboard start command must use the root entry point, which forwards to
+`backend/main.py`:
+
+```
+uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+The root `pyproject.toml`/`uv.lock` declare `uvicorn[standard]`. Render uses
+`uv` whenever a `uv.lock` exists in the service root, so the start command and
+the dependency manifest must agree: a build from the repo root installs the
+dependencies in `pyproject.toml`, not `backend/requirements.txt`. A missing
+`uvicorn` in that manifest is what produces `uvicorn: command not found` even
+though the build succeeds.
 
 Deploy a branch that contains this config (the `main` branch may lag behind),
 then set `DATABASE_URL` to your Postgres URL. Without it the service starts on
-SQLite, which is wiped on every deploy. `pip install uvicorn[standard]` is
+SQLite, which is wiped on every deploy. The `uvicorn[standard]` extra is
 required for the `/ws/*` endpoints.
 
 ## Learn more
