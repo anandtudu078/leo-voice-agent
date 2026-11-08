@@ -1,223 +1,184 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
-import { Mic, MicOff, Terminal, Code2, Sparkles, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useAuthStore } from '@/app/auth'
 
-type WsMessage =
-  | { type: 'transcript'; transcript: string }
-  | { type: 'plan'; action: string; tool: string; reason: string; steps: Array<{ tool: string; path?: string; code?: string }> }
-  | { type: 'code'; code: string; patch: string }
-  | { type: 'logs'; logs: string[] }
-  | { type: 'error'; message: string }
-  | { type: 'tts-ready'; message: string }
+// react-router is not used; the landing redirects via window.location.href
 
-export default function LeoDashboard() {
-  const [isRecording, setIsRecording] = useState(false)
-  const [transcript, setTranscript] = useState('')
-  const [codeOutput, setCodeOutput] = useState('// Leo is ready. Click the mic and speak.')
-  const [logs, setLogs] = useState<string[]>([])
-  const [loading, setLoading] = useState(false)
-  const [socket, setSocket] = useState<WebSocket | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-  const audioBlobRef = useRef<Blob | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
+/**
+ * Landing page.
+ *
+ * Clean project introduction with sign-in. After sign-in the user is taken
+ * to /code, the code-space IDE where they write the project by voice.
+ *
+ * The authenticated redirect happens in useEffect (after mount) so that the
+ * server and the client always render the same static HTML. This keeps
+ * Next.js hydration happy: there is no server/client branch on the root
+ * element that diverges between the server-rendered HTML and the client.
+ */
+export default function LandingPage() {
+  const { session, signIn, signOut } = useAuthStore()
+  const [email, setEmail] = useState('')
 
-  const connect = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    const wsUrl = `${protocol}//${host}/ws/process-voice`
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      setLoading(true)
-      // Send language code metadata first
-      ws.send(JSON.stringify({ language_code: 'en-IN' }))
+  // Redirect authenticated visitors to the code-space IDE after the
+  // component has mounted (and hydrated). This is a client-side redirect
+  // only; the server renders the same landing HTML for everyone.
+  useEffect(() => {
+    if (session && session.user) {
+      window.location.href = '/code'
     }
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: WsMessage = JSON.parse(event.data)
-        switch (msg.type) {
-          case 'transcript':
-            setTranscript(msg.transcript)
-            break
-          case 'plan':
-            setCodeOutput(`// Plan: ${msg.action} - ${msg.tool}\n// ${msg.reason}`)
-            break
-          case 'code':
-            setCodeOutput(msg.code)
-            break
-          case 'logs':
-            setLogs((prev) => [...prev, ...msg.logs])
-            break
-          case 'error':
-            setCodeOutput(`// Error: ${msg.message}`)
-            break
-          case 'tts-ready':
-            break
-        }
-      } catch {
-        // ignore malformed messages
-      }
-    }
-
-    ws.onclose = () => {
-      setLoading(false)
-    }
-
-    ws.onerror = () => {
-      setLoading(false)
-    }
-  }, [])
-
-  const startRecording = async () => {      audioChunksRef.current = []
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
-      mediaRecorderRef.current = mediaRecorder
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data)
-        }
-      }
-
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
-        audioBlobRef.current = blob
-        await sendAudioToBackend(blob)
-      }
-
-      mediaRecorder.start()
-      setIsRecording(true)
-    } catch (err) {
-      console.error('Microphone access denied:', err)
-      alert('Please allow microphone access to use Leo.')
-    }
-  }
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
-    }
-  }
-
-  const sendAudioToBackend = async (blob: Blob) => {
-    setLoading(true)
-    setCodeOutput('// Leo is listening, transcribing via Gnani AI...')
-
-    // Try WebSocket first
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(blob)
-      return
-    }
-
-    // Fallback: HTTP endpoint
-    try {
-      const res = await fetch('http://localhost:8000/api/process-voice', {
-        method: 'POST',
-        body: blob,
-      })
-      const data = await res.json()
-      setTranscript(data.transcript || '')
-      setCodeOutput(data.code || '// No output')
-      setLogs([])
-    } catch (error) {
-      console.error('Error processing voice:', error)
-      setCodeOutput('// Error connecting to backend. Is the FastAPI server running?')
-    } finally {
-      setLoading(false)
-    }
-  }
+  }, [session, session?.user])
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col p-4 md:p-6">
-      <div className="max-w-5xl mx-auto flex-1 flex flex-col gap-4">
-        {/* Header */}
-        <header className="flex items-center justify-between border-b border-slate-800 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 p-2 rounded-xl">
-              <Mic className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold leading-tight">LEO</h1>
-              <p className="text-xs text-slate-400">Voice AI Engineer</p>
-            </div>
+    <main className="min-h-screen bg-[#0b0f19] text-white flex flex-col">
+      {/* ===== Top Navigation ===== */}
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 md:px-12 py-4 bg-[#0b0f19]/95 flex-wrap gap-3 border-b border-white/5">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 19v3" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <rect x="9" y="2" width="6" height="13" rx="3" />
+            </svg>
           </div>
-          <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full text-xs text-emerald-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            Live
-          </div>
-        </header>
+          <span className="font-bold text-lg tracking-tight">Project Workspace</span>
+        </div>
 
-        {/* Voice Control Panel */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-                Speak
-              </h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Speak naturally in English or Hinglish.
-              </p>
+        <nav className="flex items-center gap-3 text-sm flex-wrap">
+          {session ? (
+            <div className="flex items-center gap-3">
+              <span className="text-white/70 text-sm hidden sm:inline">{session.user.email}</span>
+              <button
+                onClick={signOut}
+                className="px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/80 transition-colors"
+              >
+                Sign out
+              </button>
             </div>
-            <div className="text-xs text-slate-500 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 font-mono">
-              {transcript || 'Awaiting voice command...'}
-            </div>
-          </div>
-
-          <div className="flex flex-col items-center justify-center py-6">
+          ) : (
             <button
-              onClick={isRecording ? stopRecording : startRecording}
-              className={`relative group p-6 md:p-8 rounded-full transition-all duration-300 shadow-lg ${
-                isRecording
-                  ? 'bg-rose-600 hover:bg-rose-500 animate-bounce'
-                  : 'bg-indigo-600 hover:bg-indigo-500'
-              }`}
-              aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+              onClick={() => signIn(email, '')}
+              className="px-4 py-1.5 rounded-md bg-[#635bff] text-white text-sm font-medium hover:opacity-90 transition-opacity"
             >
-              {isRecording ? <MicOff className="w-8 h-8 text-white" /> : <Mic className="w-8 h-8 text-white" />}
+              Sign in
             </button>
-            <span className="text-xs text-slate-400 mt-3 font-medium">
-              {isRecording ? 'Listening... click to stop' : 'Click to speak'}
-            </span>
+          )}
+        </nav>
+      </header>
+
+      {/* ===== Hero ===== */}
+      <section className="relative flex flex-col lg:flex-row items-center py-24 md:py-32 px-6 md:px-12 pt-20">
+        <div className="flex-1 text-center lg:text-left max-w-xl">
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-tight tracking-tight">
+            Write your project{' '}
+            <span className="text-[#635bff]">by voice</span>.
+          </h1>
+          <p className="mt-5 text-lg text-white/60">
+            Open the code space. Describe what you want — a file, a feature, a fix —
+            and the agent builds, tests, and ships it for you.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center lg:justify-start gap-4">
+            <button
+              onClick={() => signIn(email, '')}
+              className="flex items-center gap-2 px-6 py-3 rounded-lg bg-[#635bff] text-white font-medium hover:opacity-90 transition-opacity"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19v3" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <rect x="9" y="2" width="6" height="13" rx="3" />
+              </svg>
+              Open code space
+            </button>
+            <a
+              href="#features"
+              className="px-5 py-3 rounded-lg border border-white/10 text-white/80 text-sm font-medium hover:bg-white/5 hover:text-white transition-colors"
+            >
+              Features
+            </a>
           </div>
         </div>
 
-        {/* Code Output Panel */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-6 flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <Code2 className="w-4 h-4 text-indigo-400" />
-              Generated Code
-            </h2>
-            <span className="text-xs bg-slate-800 px-2 py-1 rounded text-slate-400 font-mono">
-              Output
-            </span>
-          </div>
-
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex-1 overflow-auto">
-            <pre className="whitespace-pre-wrap font-mono text-sm text-emerald-300 leading-relaxed">
-              {loading ? (
-                <span className="text-indigo-400 animate-pulse">// Generating...</span>
-              ) : (
-                <>
-                  {logs.map((log, i) => (
-                    <div key={i} className="text-xs text-slate-500 mb-1">
-                      {log}
-                    </div>
-                  ))}
-                  {codeOutput}
-                </>
-              )}
-            </pre>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center text-white/40 max-w-xs">
+            <svg width="200" height="200" viewBox="0 0 200 200" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="20" y="40" width="160" height="120" rx="8" />
+              <path d="M20 40h160v16" />
+              <path d="M20 90h160" />
+              <path d="M20 140h80" />
+              <path d="M20 140v60" />
+              <path d="M100 140v60" />
+              <path d="M140 140v60" />
+            </svg>
+            <p className="text-white/30 mt-4 text-sm">Code workspace (after sign in)</p>
           </div>
         </div>
-      </div>
+      </section>
+
+      {/* ===== Features ===== */}
+      <section id="features" className="px-6 md:px-12 py-16">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center">
+            <h2 className="text-2xl md:text-3xl font-bold">How it works</h2>
+            <p className="text-white/50 mt-2 text-sm">Four quick steps from idea to shipped code.</p>
+          </div>
+
+          <div className="mt-12 grid md:grid-cols-2 gap-6 max-w-3xl">
+            {[
+              {
+                n: '01',
+                title: 'Open the code space',
+                body: 'Click Open code space after signing in. The IDE loads your workspace.',
+              },
+              {
+                n: '02',
+                title: 'Speak your change',
+                body: 'Say what you want: "add a login form", "fix the bug in checkout.js". The agent listens.',
+              },
+              {
+                n: '03',
+                title: 'Agent writes the code',
+                body: 'It reads the relevant files, writes the code, and shows it in the code space.',
+              },
+              {
+                n: '04',
+                title: 'Run and ship',
+                body: 'The agent runs the test suite and pushes real changes to your project.',
+              },
+            ].map((f) => (
+              <div key={f.n} className="p-5 rounded-lg border border-white/5 bg-white/3">
+                <div className="flex items-center gap-3">
+                  <span className="w-7 h-7 rounded-full bg-[#635bff] text-white flex items-center justify-center text-xs font-bold">
+                    {f.n}
+                  </span>
+                  <h3 className="text-sm font-semibold">{f.title}</h3>
+                </div>
+                <p className="text-xs text-white/50 mt-2 leading-relaxed">{f.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ===== Footer ===== */}
+      <footer id="footer" className="border-t border-white/5 px-6 md:px-12 py-8">
+        <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-white/40">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded-lg bg-white flex items-center justify-center">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19v3" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <rect x="9" y="2" width="6" height="13" rx="3" />
+              </svg>
+            </div>
+            <span className="font-semibold">Project Workspace</span>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            <a href="#features" className="hover:text-white/70 transition-colors">Features</a>
+            <a href="#footer" className="hover:text-white/70 transition-colors">Terms</a>
+            <a href="#footer" className="hover:text-white/70 transition-colors">Privacy</a>
+          </div>
+        </div>
+      </footer>
     </main>
   )
 }
