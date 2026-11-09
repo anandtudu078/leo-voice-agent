@@ -166,6 +166,18 @@ app.add_middleware(
 init_db()
 
 
+@app.get("/")
+@app.head("/")
+async def root():
+    """Root probe for Render/browser checks."""
+    return {
+        "status": "ok",
+        "service": "leo-voice-agent-backend",
+        "health": "/api/health",
+        "docs": "/docs",
+    }
+
+
 @app.get("/api/health")
 async def health():
     """Liveness probe for Render (and any uptime monitor). Returns instantly."""
