@@ -81,7 +81,7 @@ def plan_from_transcript(transcript: str, tools: list[dict]) -> dict:
                 EVON_URL,
                 json=payload,
                 headers={"X-API-Key-ID": EVON_API_KEY},
-                timeout=30,
+                timeout=3,
             )
             response.raise_for_status()
             data = response.json()

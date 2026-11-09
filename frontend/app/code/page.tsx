@@ -669,16 +669,29 @@ function CodeSpaceShell({
             setVoiceStatus('ready')
             break
           }
-          case 'speech':
-            setLogs((prev) => [
-              ...prev,
-              `{ Agent says: ${msg.text || '<reply>'} }`,
-            ])
-            pushMessage('leo', msg.text || '')
+          case 'reply': {
+            // Fast text path: show reply immediately while TTS is still generating.
+            const text = String(msg.text || '')
+            if (text) {
+              setLogs((prev) => [...prev, `{ Agent says: ${text} }`])
+              pushMessage('leo', text)
+            }
+            setVoiceStatus('ready')
+            setAgentStatus('done')
+            if (msg.tts === 'pending') setTtsStatus('idle')
+            break
+          }
+          case 'speech': {
+            const text = String(msg.text || '')
+            const audioOnly = Boolean(msg.audio_only)
+            if (!audioOnly && text) {
+              setLogs((prev) => [...prev, `{ Agent says: ${text} }`])
+              pushMessage('leo', text)
+            }
             setVoiceStatus('ready')
             setAgentStatus('done')
             try {
-              const base64 = msg.speech || ''
+              const base64 = String(msg.speech || msg.audio || '')
               if (base64) {
                 const binary = atob(base64)
                 const bytes = new Uint8Array(binary.length)
@@ -708,6 +721,7 @@ function CodeSpaceShell({
               setTtsStatus('error')
             }
             break
+          }
           case 'error': {
             const message = String(msg.error || '')
             setLogs((prev) => [...prev, `ERROR: ${message}`])

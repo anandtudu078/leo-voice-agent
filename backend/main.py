@@ -652,7 +652,7 @@ async def _speak(text: str) -> bytes:
     if not text:
         return b""
     try:
-        return tts_client.synthesize(text)
+        return await asyncio.to_thread(tts_client.synthesize, text)
     except GnaniTTSError as exc:
         raise HTTPException(status_code=500, detail=f"Gnani TTS Error: {exc}") from exc
 
@@ -763,19 +763,8 @@ async def websocket_process_voice(websocket: WebSocket):
             # Never fail the conversational turn because of auto-save.
             pass
 
-        try:
-            audio = await _speak(reply)
-        except HTTPException as exc:
-            # Keep the conversation moving: show the reply even when TTS fails.
-            await websocket.send_json({"type": "error", "error": str(exc.detail)})
-            audio = b""
-        await websocket.send_json(
-            {
-                "type": "speech",
-                "speech": base64.b64encode(audio).decode("ascii") if audio else "",
-                "text": reply,
-            }
-        )
+        # Send text immediately so the UI responds fast; synthesize/play audio after.
+        await websocket.send_json({"type": "reply", "text": reply, "tts": "pending"})
         history.extend(
             [
                 {"role": "user", "text": transcript},
@@ -784,9 +773,25 @@ async def websocket_process_voice(websocket: WebSocket):
         )
         del history[:-12]
         if workspace_id is not None:
-            await asyncio.to_thread(
-                repository.record_voice_turn, workspace_id, transcript, reply
+            asyncio.create_task(
+                asyncio.to_thread(repository.record_voice_turn, workspace_id, transcript, reply)
             )
+        try:
+            audio = await _speak(reply)
+        except HTTPException as exc:
+            await websocket.send_json({"type": "error", "error": str(exc.detail)})
+            audio = b""
+        except Exception as exc:  # noqa: BLE001
+            await websocket.send_json({"type": "error", "error": str(exc)})
+            audio = b""
+        await websocket.send_json(
+            {
+                "type": "speech",
+                "speech": base64.b64encode(audio).decode("ascii") if audio else "",
+                "text": reply,
+                "audio_only": True,
+            }
+        )
         await websocket.send_json({"type": "listening", "message": "I'm listening now."})
 
     async def handle_audio(audio: bytes) -> None:
@@ -1049,19 +1054,24 @@ async def websocket_talk(websocket: WebSocket):
                     try:
                         await websocket.send_json({"type": "waiting", "message": "Thinking..."})
                         reply = await _generate_reply(text)
-                        audio = await _speak(reply)
-                        if audio:
-                            await websocket.send_json(
-                                {"type": "speech", "audio": base64.b64encode(audio).decode("ascii")}
-                            )
-                        else:
-                            await websocket.send_json(
-                                {"type": "speech", "audio": base64.b64encode(b"").decode("ascii")}
-                            )
+                        await websocket.send_json({"type": "reply", "text": reply, "tts": "pending"})
                         if workspace_id is not None:
-                            await asyncio.to_thread(
-                                repository.record_voice_turn, workspace_id, text, reply
+                            asyncio.create_task(
+                                asyncio.to_thread(repository.record_voice_turn, workspace_id, text, reply)
                             )
+                        try:
+                            audio = await _speak(reply)
+                        except Exception as exc:  # noqa: BLE001
+                            await websocket.send_json({"type": "error", "message": str(exc)})
+                            audio = b""
+                        await websocket.send_json(
+                            {
+                                "type": "speech",
+                                "audio": base64.b64encode(audio).decode("ascii") if audio else "",
+                                "text": reply,
+                                "audio_only": True,
+                            }
+                        )
                         await websocket.send_json({"type": "listening", "message": "I'm listening now."})
                     except HTTPException as exc:
                         await websocket.send_json({"type": "error", "message": exc.detail})
