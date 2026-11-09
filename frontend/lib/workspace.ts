@@ -14,6 +14,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: 'include', ...init })
   const data = await response.json().catch(() => null)
   if (!response.ok) {
+    if (response.status === 404 && url.startsWith('/api/files')) {
+      throw new Error(
+        'the backend is running an older build without the file API — restart or redeploy it',
+      )
+    }
     const payload = data as { detail?: string; error?: string } | null
     const detail =
       (payload && (payload.detail || payload.error)) ||
@@ -28,6 +33,16 @@ const json = (body: unknown): RequestInit => ({
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 })
+
+/** Lightweight reachability probe; also keeps a sleeping backend warm. */
+export async function checkBackendHealth(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/health', { cache: 'no-store' })
+    return response.ok
+  } catch {
+    return false
+  }
+}
 
 export async function listWorkspace(): Promise<WorkspaceEntry[]> {
   const data = await request<{ files: WorkspaceEntry[] }>('/api/files/tree', {
