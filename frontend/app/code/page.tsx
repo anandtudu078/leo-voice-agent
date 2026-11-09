@@ -948,15 +948,14 @@ function CodeSpaceShell({
               <div className="flex flex-col h-full min-h-0 font-mono text-xs" tabindex="0" onKeyDown={(e) => {
                 if (e.key === 'ArrowUp') {
                   e.preventDefault()
-                  // Navigate up in terminal history - move focus to previous log
                   setActiveLog((prev) => prev > 0 ? prev - 1 : logs.length - 1)
                 }
                 if (e.key === 'ArrowDown') {
                   e.preventDefault()
-                  // Navigate down in terminal history - move focus to next log
                   setActiveLog((prev) => prev < logs.length - 1 ? prev + 1 : 0)
                 }
-              }}">
+              }}
+              >
                 <div className="text-white/40 shrink-0">Leo sandbox terminal</div>
                 <div className="flex-1 min-h-0 overflow-y-auto text-white/55 space-y-0.5 mt-1" role="dialog" aria-label="Terminal log">
                   {logs.map((log, i) => (
@@ -972,7 +971,6 @@ function CodeSpaceShell({
                     <div className="text-white/25">$ Run a file to see its output here.</div>
                   )}
                 </div>
-              </div>
             )}
 
             {panelTab === 'problems' && (
