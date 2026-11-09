@@ -6,28 +6,84 @@ import type { ReactNode } from 'react'
 
 const KEYWORDS = new Set([
   // Python
-  'def', 'class', 'return', 'if', 'elif', 'else', 'for', 'while', 'in', 'not',
-  'and', 'or', 'import', 'from', 'as', 'with', 'try', 'except', 'finally',
-  'raise', 'pass', 'break', 'continue', 'lambda', 'yield', 'global', 'nonlocal',
-  'assert', 'del', 'is', 'None', 'True', 'False', 'async', 'await', 'match',
-  'case', 'self',
+  'def',
+  'class',
+  'return',
+  'if',
+  'elif',
+  'else',
+  'for',
+  'while',
+  'in',
+  'not',
+  'and',
+  'or',
+  'import',
+  'from',
+  'as',
+  'with',
+  'try',
+  'except',
+  'finally',
+  'raise',
+  'pass',
+  'break',
+  'continue',
+  'lambda',
+  'yield',
+  'global',
+  'nonlocal',
+  'assert',
+  'del',
+  'is',
+  'None',
+  'True',
+  'False',
+  'async',
+  'await',
+  'match',
+  'case',
+  'self',
   // JavaScript / TypeScript
-  'const', 'let', 'var', 'function', 'new', 'typeof', 'instanceof', 'delete',
-  'void', 'null', 'undefined', 'this', 'super', 'export', 'default', 'extends',
-  'implements', 'interface', 'type', 'enum', 'static', 'public', 'private',
-  'protected', 'readonly', 'switch', 'throw', 'catch', 'do', 'of', 'get', 'set',
+  'const',
+  'let',
+  'var',
+  'function',
+  'new',
+  'typeof',
+  'instanceof',
+  'delete',
+  'void',
+  'null',
+  'undefined',
+  'this',
+  'super',
+  'export',
+  'default',
+  'extends',
+  'implements',
+  'interface',
+  'type',
+  'enum',
+  'static',
+  'public',
+  'private',
+  'protected',
+  'readonly',
+  'switch',
+  'throw',
+  'catch',
+  'do',
+  'of',
+  'get',
+  'set',
 ])
 
 const TOKEN_RE =
   /(#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("""[\s\S]*?"""|'''[\s\S]*?'''|`(?:\\.|[^`\\])*`|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|(\b\d+(?:\.\d+)?\b)|([A-Za-z_$][\w$]*)/g
 
 export type Language =
-  | 'python'
-  | 'javascript'
-  | 'json'
-  | 'markdown'
-  | 'shell'
-  | 'text'
+  'python' | 'javascript' | 'json' | 'markdown' | 'shell' | 'text'
 
 export function languageForPath(path: string | null): Language {
   if (!path) return 'text'

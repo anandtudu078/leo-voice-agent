@@ -17,8 +17,10 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -30,6 +32,8 @@ from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Imported after load_dotenv() so a DATABASE_URL from .env is picked up when
 # the engine is created.
@@ -234,14 +238,21 @@ async def parse_voice_command(request: Request):
             f"file contents for {path}. No markdown fences, no explanation.\n\n"
             f"User request: {instruction}\n"
         )
+        started = time.time()
         try:
-            resp = await asyncio.to_thread(
-                client.models.generate_content,
-                model=GEMINI_MODEL,
+            result = await asyncio.to_thread(
+                llm_provider.generate_text,
                 contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                gemini_model=GEMINI_MODEL,
+                task="code",
+                prefer_fast=False,
             )
-            return _strip_code_fences((getattr(resp, "text", None) or "").strip())
-        except Exception:
+            text = result[0] if isinstance(result, tuple) else str(result)
+            meta = result[2] if isinstance(result, tuple) and len(result) > 2 else {}
+            logger.info("codegen path=%s provider=%s llm_ms=%s total_ms=%s", path, meta.get("provider"), meta.get("llm_ms"), int((time.time()-started)*1000))
+            return _strip_code_fences((text or "").strip())
+        except Exception as exc:
+            logger.warning("codegen failed path=%s err=%s", path, type(exc).__name__)
             return ""
 
     try:
@@ -476,6 +487,10 @@ client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 # rate-limited upstream, so default to a model available to current keys.
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+from llm_provider import LLMFallbackProvider
+
+llm_provider = LLMFallbackProvider(gemini_client=client)
+
 SYSTEM_INSTRUCTION = (
     "You are Leo, a voice coding assistant inside a browser IDE. You are having "
     "a spoken conversation: keep answers short and natural (at most three "
@@ -584,47 +599,37 @@ async def _generate_reply(
     history: list[dict] | None = None,
     workspace: Path | None = None,
 ) -> str:
-    """Return Leo's spoken reply, with the earlier turns as context."""
-    tools = [
-        {"name": "read_file", "description": "Read a file"},
-        {"name": "write_file", "description": "Write a file"},
-        {"name": "run_script", "description": "Run a script"},
-    ]
-
+    """Return Leo's spoken reply, with earlier turns as context."""
     system = SYSTEM_INSTRUCTION
     if workspace is not None:
         system = f"{system}\n\n{_workspace_summary(workspace)}"
 
-    # The orchestrator is optional: when it recognises a tool intent we only
-    # mention it to the model, so the reply stays conversational instead of
-    # claiming work that has not happened.
-    try:
-        plan = await asyncio.to_thread(plan_from_transcript, transcript, tools)
-        if plan.get("action") in {"read", "write", "run"} and plan.get("tool"):
-            system += (
-                f"\n\nThe user is probably asking to {plan['action']} a file "
-                f"with {plan['tool']}. Ask a short clarifying question if you "
-                "need the file name or the change."
-            )
-    except Exception:  # noqa: BLE001
-        pass
+    # Fast path: skip the optional Evon planning HTTP hint to avoid latency.
+    # (Deterministic intent is not required for a conversational reply.)
 
+    max_turns = 8  # last 8 messages (user+assistant pairs trimmed) for lower latency
+    trimmed = [t for t in list(history or []) if t.get("text")][-max_turns:]
     contents = [
-        {"role": turn["role"], "parts": [{"text": turn["text"]}]}
-        for turn in list(history or [])[-12:]
-        if turn.get("text")
+        {"role": turn["role"], "parts": [{"text": str(turn.get("text") or "")[:2000]}]}
+        for turn in trimmed
     ]
-    contents.append({"role": "user", "parts": [{"text": transcript}]})
+    contents.append({"role": "user", "parts": [{"text": str(transcript or "")[:3000]}]})
 
+    started = time.time()
     try:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=GEMINI_MODEL,
+        result = await asyncio.to_thread(
+            llm_provider.generate_text,
             contents=contents,
-            config={"system_instruction": system},
+            system_instruction=system,
+            gemini_model=GEMINI_MODEL,
+            task="reply",
+            prefer_fast=True,
         )
-        reply = (response.text or "").strip()
-        return reply or "I heard you, but I'm not sure what to say yet."
+        text = result[0] if isinstance(result, tuple) else str(result)
+        meta = result[2] if isinstance(result, tuple) and len(result) > 2 else {}
+        reply = (text or "").strip() or "I heard you, but I'm not sure what to say yet."
+        logger.info("reply provider=%s model=%s llm_ms=%s total_ms=%s turns=%s", meta.get("provider"), meta.get("model"), meta.get("llm_ms"), int((time.time()-started)*1000), len(trimmed))
+        return reply
     except Exception as exc:  # noqa: BLE001
         tl = (transcript or "").lower()
         import re as _re
@@ -648,7 +653,7 @@ async def _speak(text: str) -> bytes:
     if not text:
         return b""
     try:
-        return tts_client.synthesize(text)
+        return await asyncio.to_thread(tts_client.synthesize, text)
     except GnaniTTSError as exc:
         raise HTTPException(status_code=500, detail=f"Gnani TTS Error: {exc}") from exc
 
@@ -759,19 +764,8 @@ async def websocket_process_voice(websocket: WebSocket):
             # Never fail the conversational turn because of auto-save.
             pass
 
-        try:
-            audio = await _speak(reply)
-        except HTTPException as exc:
-            # Keep the conversation moving: show the reply even when TTS fails.
-            await websocket.send_json({"type": "error", "error": str(exc.detail)})
-            audio = b""
-        await websocket.send_json(
-            {
-                "type": "speech",
-                "speech": base64.b64encode(audio).decode("ascii") if audio else "",
-                "text": reply,
-            }
-        )
+        # Send text immediately so the UI responds fast; synthesize/play audio after.
+        await websocket.send_json({"type": "reply", "text": reply, "tts": "pending"})
         history.extend(
             [
                 {"role": "user", "text": transcript},
@@ -780,9 +774,25 @@ async def websocket_process_voice(websocket: WebSocket):
         )
         del history[:-12]
         if workspace_id is not None:
-            await asyncio.to_thread(
-                repository.record_voice_turn, workspace_id, transcript, reply
+            asyncio.create_task(
+                asyncio.to_thread(repository.record_voice_turn, workspace_id, transcript, reply)
             )
+        try:
+            audio = await _speak(reply)
+        except HTTPException as exc:
+            await websocket.send_json({"type": "error", "error": str(exc.detail)})
+            audio = b""
+        except Exception as exc:  # noqa: BLE001
+            await websocket.send_json({"type": "error", "error": str(exc)})
+            audio = b""
+        await websocket.send_json(
+            {
+                "type": "speech",
+                "speech": base64.b64encode(audio).decode("ascii") if audio else "",
+                "text": reply,
+                "audio_only": True,
+            }
+        )
         await websocket.send_json({"type": "listening", "message": "I'm listening now."})
 
     async def handle_audio(audio: bytes) -> None:
@@ -1045,19 +1055,24 @@ async def websocket_talk(websocket: WebSocket):
                     try:
                         await websocket.send_json({"type": "waiting", "message": "Thinking..."})
                         reply = await _generate_reply(text)
-                        audio = await _speak(reply)
-                        if audio:
-                            await websocket.send_json(
-                                {"type": "speech", "audio": base64.b64encode(audio).decode("ascii")}
-                            )
-                        else:
-                            await websocket.send_json(
-                                {"type": "speech", "audio": base64.b64encode(b"").decode("ascii")}
-                            )
+                        await websocket.send_json({"type": "reply", "text": reply, "tts": "pending"})
                         if workspace_id is not None:
-                            await asyncio.to_thread(
-                                repository.record_voice_turn, workspace_id, text, reply
+                            asyncio.create_task(
+                                asyncio.to_thread(repository.record_voice_turn, workspace_id, text, reply)
                             )
+                        try:
+                            audio = await _speak(reply)
+                        except Exception as exc:  # noqa: BLE001
+                            await websocket.send_json({"type": "error", "message": str(exc)})
+                            audio = b""
+                        await websocket.send_json(
+                            {
+                                "type": "speech",
+                                "audio": base64.b64encode(audio).decode("ascii") if audio else "",
+                                "text": reply,
+                                "audio_only": True,
+                            }
+                        )
                         await websocket.send_json({"type": "listening", "message": "I'm listening now."})
                     except HTTPException as exc:
                         await websocket.send_json({"type": "error", "message": exc.detail})
@@ -1485,12 +1500,21 @@ async def explain_code(request: Request, payload: ExplainCodeRequest):
         "and mention syntax/concepts being used. "
         f"Path: {path or 'untitled'}. Language: {language}. Goal: {goal or 'implement the user request'}.\n\nCODE:\n" + code
     )
+    started = time.time()
     try:
-        if not os.getenv("GEMINI_API_KEY"):
-            raise RuntimeError("no gemini key")
-        response = await asyncio.to_thread(client.models.generate_content, model=GEMINI_MODEL, contents=prompt)
-        text = getattr(response, "text", None) or ""
-        steps = _parse_explain_json(text, code, path, goal)
+        result = await asyncio.to_thread(
+            llm_provider.generate_text,
+            contents=prompt,
+            gemini_model=GEMINI_MODEL,
+            task="explain",
+            prefer_fast=False,
+        )
+        text = result[0] if isinstance(result, tuple) else str(result)
+        provider = result[1] if isinstance(result, tuple) and len(result) > 1 else "unknown"
+        meta = result[2] if isinstance(result, tuple) and len(result) > 2 else {}
+        logger.info("explain path=%s provider=%s llm_ms=%s total_ms=%s", path, provider, meta.get("llm_ms"), int((time.time()-started)*1000))
+        steps = _parse_explain_json(text or "", code, path, goal)
+        return {"path": path, "language": language, "steps": steps, "provider": provider}
     except Exception:
         steps = _fallback_explain_steps(code, path, goal)
-    return {"path": path, "language": language, "steps": steps}
+        return {"path": path, "language": language, "steps": steps, "provider": "fallback"}

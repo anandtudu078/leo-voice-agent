@@ -23,12 +23,19 @@ export class WavRecorder {
 
   /** Ask for the microphone and start collecting samples. */
   static async start(): Promise<WavRecorder> {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
       throw new Error('Microphone is not available in this browser')
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
     })
 
     let context: AudioContext
@@ -46,7 +53,9 @@ export class WavRecorder {
 
     processor.onaudioprocess = (event) => {
       if (recorder.closed) return
-      recorder.chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
+      recorder.chunks.push(
+        new Float32Array(event.inputBuffer.getChannelData(0)),
+      )
     }
     source.connect(processor)
     processor.connect(context.destination)
@@ -70,7 +79,10 @@ export class WavRecorder {
     this.chunks = []
     if (samples.length < inputRate * MIN_SECONDS) return emptyWav()
 
-    return encodeWav(downsample(samples, inputRate, TARGET_SAMPLE_RATE), TARGET_SAMPLE_RATE)
+    return encodeWav(
+      downsample(samples, inputRate, TARGET_SAMPLE_RATE),
+      TARGET_SAMPLE_RATE,
+    )
   }
 }
 
@@ -90,7 +102,11 @@ function mergeChunks(chunks: Float32Array[]): Float32Array {
 }
 
 /** Average-sample down to the target rate (e.g. 48 kHz -> 16 kHz). */
-function downsample(input: Float32Array, from: number, to: number): Float32Array {
+function downsample(
+  input: Float32Array,
+  from: number,
+  to: number,
+): Float32Array {
   if (to >= from) return input
 
   const ratio = from / to
@@ -131,12 +147,17 @@ function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   let offset = 44
   for (let i = 0; i < samples.length; i++, offset += 2) {
     const clamped = Math.max(-1, Math.min(1, samples[i]))
-    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+    view.setInt16(
+      offset,
+      clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff,
+      true,
+    )
   }
 
   return new Blob([buffer], { type: 'audio/wav' })
 }
 
 function writeAscii(view: DataView, offset: number, text: string) {
-  for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
+  for (let i = 0; i < text.length; i++)
+    view.setUint8(offset + i, text.charCodeAt(i))
 }

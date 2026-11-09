@@ -37,7 +37,16 @@ export function Panel({
           aria-expanded={open}
           title={open ? 'Close panel (Ctrl+J)' : 'Open panel (Ctrl+J)'}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             {open ? (
               <polyline points="6 9 12 15 18 9" />
             ) : (
@@ -56,7 +65,9 @@ export function Panel({
             </button>
           ))}
         </div>
-        <div className="text-[10px] text-white/30 font-mono pr-1">Panel · Ctrl+J</div>
+        <div className="text-[10px] text-white/30 font-mono pr-1">
+          Panel · Ctrl+J
+        </div>
       </div>
       <div className="ide-panel-content flex-1">{children}</div>
     </div>

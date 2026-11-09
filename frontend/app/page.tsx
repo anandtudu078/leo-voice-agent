@@ -17,18 +17,22 @@ export default function LandingPage() {
   const [showLogin, setShowLogin] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [year, setYear] = useState<number | null>(null)
-
-  useEffect(() => {
-    if (session && session.user) {
-      window.location.href = '/code'
-    }
-  }, [session])
-
-  // Keep the footer year current without calling Date during prerendering.
-  useEffect(() => {
-    const id = window.requestAnimationFrame(() => setYear(new Date().getFullYear()))
-    return () => window.cancelAnimationFrame(id)
+  const [year, setYear] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (session && session.user) {
+      window.location.href = '/code'
+    }
+  }, [session])
+
+  // Keep the footer year current without calling Date during prerendering.
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() =>
+      setYear(new Date().getFullYear()),
+    )
+
+    return () => window.cancelAnimationFrame(id)
   }, [])
 
   useEffect(() => {
@@ -69,13 +73,24 @@ export default function LandingPage() {
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#635bff] text-white shadow-lg shadow-[#635bff]/25">
               <BrandMark />
             </span>
-            <span className="text-[17px] font-semibold tracking-tight">Leo</span>
+            <span className="text-[17px] font-semibold tracking-tight">
+              Leo
+            </span>
           </a>
 
           <nav className="hidden items-center gap-7 text-sm text-white/60 md:flex">
-            <a href="#product" className="transition-colors hover:text-white">Product</a>
-            <a href="#features" className="transition-colors hover:text-white">Features</a>
-            <a href="#how-it-works" className="transition-colors hover:text-white">How it works</a>
+            <a href="#product" className="transition-colors hover:text-white">
+              Product
+            </a>
+            <a href="#features" className="transition-colors hover:text-white">
+              Features
+            </a>
+            <a
+              href="#how-it-works"
+              className="transition-colors hover:text-white"
+            >
+              How it works
+            </a>
           </nav>
 
           {session ? (
@@ -99,12 +114,26 @@ export default function LandingPage() {
             </button>
           )}
         </div>
-      </header>      {/* ===== Hero ===== */}
+      </header>{' '}
+      {/* ===== Hero ===== */}
       <section id="top" className="relative overflow-hidden">
-        <div aria-hidden="true" className="landing-orb left-[-8%] top-[-6%] h-72 w-72 bg-[#635bff]" style={{ animation: 'landing-pulse-soft 9s ease-in-out infinite' }} />
-        <div aria-hidden="true" className="landing-orb right-[-10%] top-[18%] h-64 w-64 bg-[#3b82f6] opacity-30" />
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(65%_55%_at_50%_-5%,rgba(99,91,255,0.28),transparent_72%)]" />
-        <div aria-hidden="true" className="landing-grid pointer-events-none absolute inset-0 opacity-60" />
+        <div
+          aria-hidden="true"
+          className="landing-orb left-[-8%] top-[-6%] h-72 w-72 bg-[#635bff]"
+          style={{ animation: 'landing-pulse-soft 9s ease-in-out infinite' }}
+        />
+        <div
+          aria-hidden="true"
+          className="landing-orb right-[-10%] top-[18%] h-64 w-64 bg-[#3b82f6] opacity-30"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(65%_55%_at_50%_-5%,rgba(99,91,255,0.28),transparent_72%)]"
+        />
+        <div
+          aria-hidden="true"
+          className="landing-grid pointer-events-none absolute inset-0 opacity-60"
+        />
 
         <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-6 pb-16 pt-14 lg:grid-cols-[1.02fr_1.08fr] lg:gap-16 lg:pb-24 lg:pt-20">
           <div className="text-center lg:text-left">
@@ -118,15 +147,18 @@ export default function LandingPage() {
 
             <h1 className="mt-7 text-4xl font-semibold leading-[1.06] tracking-tight sm:text-5xl lg:text-[3.55rem]">
               Build software at the
-              <span className="block bg-gradient-to-r from-[#c4bfff] via-[#9b93ff] to-[#635bff] bg-clip-text pb-1 text-transparent sm:inline sm:pb-0"> speed of speech</span>
+              <span className="block bg-gradient-to-r from-[#c4bfff] via-[#9b93ff] to-[#635bff] bg-clip-text pb-1 text-transparent sm:inline sm:pb-0">
+                {' '}
+                speed of speech
+              </span>
               <span className="sm:hidden">.</span>
               <span className="hidden sm:inline">.</span>
             </h1>
 
             <p className="mx-auto mt-5 max-w-xl text-[15px] leading-relaxed text-white/58 lg:mx-0 lg:text-lg">
-              Leo is a code workspace you talk to. Describe a feature, a fix, or a
-              whole file — the agent writes it, shows the diff in a real editor, and
-              runs it in an isolated sandbox.
+              Leo is a code workspace you talk to. Describe a feature, a fix, or
+              a whole file — the agent writes it, shows the diff in a real
+              editor, and runs it in an isolated sandbox.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
@@ -134,7 +166,9 @@ export default function LandingPage() {
                 onClick={openLogin}
                 className="group inline-flex items-center gap-2 rounded-xl bg-[#635bff] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#635bff]/30 ring-1 ring-white/10 transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#746cff] hover:shadow-xl hover:shadow-[#635bff]/35"
               >
-                <span className="transition-transform duration-200 group-hover:scale-110"><MicIcon /></span>
+                <span className="transition-transform duration-200 group-hover:scale-110">
+                  <MicIcon />
+                </span>
                 Start building free
               </button>
               <a
@@ -146,9 +180,18 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-9 grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-3 text-left backdrop-blur-sm sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-white/[0.07]">
-              {['No credit card', 'Files persist per account', 'Python & JavaScript sandbox'].map((item) => (
-                <div key={item} className="flex items-center gap-2 px-1 py-1.5 text-xs text-white/55 sm:justify-center sm:px-3">
-                  <span className="shrink-0"><CheckIcon /></span>
+              {[
+                'No credit card',
+                'Files persist per account',
+                'Python & JavaScript sandbox',
+              ].map((item) => (
+                <div
+                  key={item}
+                  className="flex items-center gap-2 px-1 py-1.5 text-xs text-white/55 sm:justify-center sm:px-3"
+                >
+                  <span className="shrink-0">
+                    <CheckIcon />
+                  </span>
                   <span>{item}</span>
                 </div>
               ))}
@@ -160,9 +203,11 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
-
       {/* ===== Product preview copy ===== */}
-      <section id="product" className="relative border-y border-white/[0.06] bg-gradient-to-b from-white/[0.02] to-transparent">
+      <section
+        id="product"
+        className="relative border-y border-white/[0.06] bg-gradient-to-b from-white/[0.02] to-transparent"
+      >
         <div className="mx-auto max-w-6xl px-6 py-16 md:py-20">
           <div className="grid gap-4 md:grid-cols-3">
             {[
@@ -186,17 +231,35 @@ export default function LandingPage() {
                 key={item.title}
                 className="landing-card group relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0f1420]/80 p-6"
               >
-                <div aria-hidden="true" className="absolute right-4 top-3 text-3xl font-semibold tracking-tight text-white/[0.04] transition-colors group-hover:text-[#635bff]/15">{item.n}</div>
-                <div className="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-[#635bff]/25 to-[#635bff]/5 text-xs font-semibold text-[#b9b3ff] ring-1 ring-[#635bff]/20">{item.n}</div>
-                <h2 className="text-base font-semibold text-white">{item.title}</h2>
-                <p className="mt-2 text-sm leading-relaxed text-white/52">{item.body}</p>
+                <div
+                  aria-hidden="true"
+                  className="absolute right-4 top-3 text-3xl font-semibold tracking-tight text-white/[0.04] transition-colors group-hover:text-[#635bff]/15"
+                >
+                  {item.n}
+                </div>
+                <div className="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-[#635bff]/25 to-[#635bff]/5 text-xs font-semibold text-[#b9b3ff] ring-1 ring-[#635bff]/20">
+                  {item.n}
+                </div>
+                <h2 className="text-base font-semibold text-white">
+                  {item.title}
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-white/52">
+                  {item.body}
+                </p>
               </article>
             ))}
           </div>
         </div>
-      </section>      {/* ===== Features ===== */}
-      <section id="features" className="relative mx-auto max-w-6xl px-6 py-20 md:py-24">
-        <div aria-hidden="true" className="pointer-events-none absolute right-0 top-24 h-56 w-56 rounded-full bg-[#635bff]/10 blur-3xl" />
+      </section>{' '}
+      {/* ===== Features ===== */}
+      <section
+        id="features"
+        className="relative mx-auto max-w-6xl px-6 py-20 md:py-24"
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute right-0 top-24 h-56 w-56 rounded-full bg-[#635bff]/10 blur-3xl"
+        />
         <div className="relative grid gap-10 lg:grid-cols-[0.95fr_1.25fr] lg:items-start lg:gap-14">
           <div className="lg:sticky lg:top-24">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8b83ff]">
@@ -206,8 +269,8 @@ export default function LandingPage() {
               Everything you need between an idea and working code
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-white/52 md:text-base">
-              Voice is the fastest way in, but Leo never hides the code. Inspect,
-              edit, and run exactly like a normal editor.
+              Voice is the fastest way in, but Leo never hides the code.
+              Inspect, edit, and run exactly like a normal editor.
             </p>
             <div className="mt-6 hidden h-px w-24 bg-gradient-to-r from-[#635bff]/60 to-transparent lg:block" />
           </div>
@@ -252,15 +315,26 @@ export default function LandingPage() {
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#635bff]/20 bg-[#635bff]/12 text-[#b9b3ff] shadow-[0_0_24px_-12px_rgba(99,91,255,0.8)] transition-transform duration-200 group-hover:scale-105">
                   {feature.icon}
                 </div>
-                <h3 className="mt-4 text-sm font-semibold text-white">{feature.title}</h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-white/48">{feature.body}</p>
+                <h3 className="mt-4 text-sm font-semibold text-white">
+                  {feature.title}
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-white/48">
+                  {feature.body}
+                </p>
               </div>
             ))}
           </div>
         </div>
-      </section>      {/* ===== How it works ===== */}
-      <section id="how-it-works" className="relative border-t border-white/[0.06] bg-white/[0.015]">
-        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#635bff]/30 to-transparent" />
+      </section>{' '}
+      {/* ===== How it works ===== */}
+      <section
+        id="how-it-works"
+        className="relative border-t border-white/[0.06] bg-white/[0.015]"
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#635bff]/30 to-transparent"
+        />
         <div className="mx-auto max-w-6xl px-6 py-20 md:py-24">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
@@ -280,7 +354,10 @@ export default function LandingPage() {
           </div>
 
           <div className="relative mt-12">
-            <div aria-hidden="true" className="absolute left-0 right-0 top-[2.35rem] hidden h-px bg-gradient-to-r from-[#635bff]/10 via-[#635bff]/35 to-[#635bff]/10 md:block" />
+            <div
+              aria-hidden="true"
+              className="absolute left-0 right-0 top-[2.35rem] hidden h-px bg-gradient-to-r from-[#635bff]/10 via-[#635bff]/35 to-[#635bff]/10 md:block"
+            />
             <ol className="grid gap-4 md:grid-cols-3 md:gap-5">
               {[
                 {
@@ -299,7 +376,10 @@ export default function LandingPage() {
                   body: 'Review the change, press Save, then Run to see the output in the terminal.',
                 },
               ].map((step) => (
-                <li key={step.n} className="landing-card group relative rounded-2xl border border-white/[0.08] bg-gradient-to-b from-[#141a2b] to-[#0f1420] p-6">
+                <li
+                  key={step.n}
+                  className="landing-card group relative rounded-2xl border border-white/[0.08] bg-gradient-to-b from-[#141a2b] to-[#0f1420] p-6"
+                >
                   <div className="flex items-center gap-3">
                     <span className="relative z-[1] flex h-10 w-10 items-center justify-center rounded-xl bg-[#635bff] text-sm font-semibold text-white shadow-lg shadow-[#635bff]/25 ring-4 ring-[#0b0f19]">
                       {step.n}
@@ -308,18 +388,24 @@ export default function LandingPage() {
                       STEP {step.n}
                     </span>
                   </div>
-                  <h3 className="mt-4 text-base font-semibold text-white">{step.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-white/48">{step.body}</p>
+                  <h3 className="mt-4 text-base font-semibold text-white">
+                    {step.title}
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-white/48">
+                    {step.body}
+                  </p>
                 </li>
               ))}
             </ol>
           </div>
         </div>
       </section>
-
       {/* ===== Command examples ===== */}
       <section className="relative mx-auto max-w-6xl overflow-hidden px-6 py-20 md:py-24">
-        <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#635bff]/8 blur-3xl" />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#635bff]/8 blur-3xl"
+        />
         <div className="relative grid gap-10 lg:grid-cols-[0.88fr_1.12fr] lg:items-center">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8b83ff]">
@@ -329,8 +415,8 @@ export default function LandingPage() {
               A few things you can ask for
             </h2>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-white/52">
-              Leo keeps the conversation in context, so follow-ups work the way you
-              expect — “make it async”, “add a test”, “run it again”.
+              Leo keeps the conversation in context, so follow-ups work the way
+              you expect — “make it async”, “add a test”, “run it again”.
             </p>
           </div>
 
@@ -344,24 +430,37 @@ export default function LandingPage() {
               <li
                 key={command}
                 className="landing-card flex items-start gap-3 rounded-2xl border border-white/[0.08] bg-gradient-to-r from-white/[0.04] to-white/[0.02] px-4 py-3.5"
-                style={{ marginLeft: i % 2 ? '0.75rem' : 0, marginRight: i % 2 ? 0 : '0.75rem' }}
+                style={{
+                  marginLeft: i % 2 ? '0.75rem' : 0,
+                  marginRight: i % 2 ? 0 : '0.75rem',
+                }}
               >
                 <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#635bff]/12 text-[#a79fff] ring-1 ring-[#635bff]/15">
                   <QuoteIcon />
                 </span>
-                <span className="text-sm leading-relaxed text-white/72">{command}</span>
+                <span className="text-sm leading-relaxed text-white/72">
+                  {command}
+                </span>
               </li>
             ))}
           </ul>
         </div>
       </section>
-
       {/* ===== CTA ===== */}
       <section className="px-6 pb-20 md:pb-24">
         <div className="relative mx-auto max-w-6xl overflow-hidden rounded-3xl border border-[#635bff]/25 bg-gradient-to-br from-[#171d31] via-[#121827] to-[#0d1220] px-6 py-12 text-center shadow-[0_30px_80px_-40px_rgba(99,91,255,0.45)] sm:px-10 sm:py-14">
-          <div aria-hidden="true" className="landing-grid pointer-events-none absolute inset-0 opacity-30" />
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(55%_90%_at_50%_-10%,rgba(99,91,255,0.32),transparent_68%)]" />
-          <div aria-hidden="true" className="pointer-events-none absolute -bottom-20 left-1/2 h-56 w-[28rem] -translate-x-1/2 rounded-full bg-[#635bff]/20 blur-3xl" />
+          <div
+            aria-hidden="true"
+            className="landing-grid pointer-events-none absolute inset-0 opacity-30"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(55%_90%_at_50%_-10%,rgba(99,91,255,0.32),transparent_68%)]"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -bottom-20 left-1/2 h-56 w-[28rem] -translate-x-1/2 rounded-full bg-[#635bff]/20 blur-3xl"
+          />
           <div className="relative">
             <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-white/55">
               Ready when you are
@@ -370,20 +469,21 @@ export default function LandingPage() {
               Your next feature is one sentence away
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-white/52 sm:text-[15px]">
-              Sign in with any email to open a workspace. No install, no setup — the
-              editor loads in your browser.
+              Sign in with any email to open a workspace. No install, no setup —
+              the editor loads in your browser.
             </p>
             <button
               onClick={openLogin}
               className="group mt-8 inline-flex items-center gap-2 rounded-xl bg-[#635bff] px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-[#635bff]/30 ring-1 ring-white/10 transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#746cff] hover:shadow-xl hover:shadow-[#635bff]/35"
             >
-              <span className="transition-transform duration-200 group-hover:scale-110"><MicIcon /></span>
+              <span className="transition-transform duration-200 group-hover:scale-110">
+                <MicIcon />
+              </span>
               Open Leo
             </button>
           </div>
         </div>
       </section>
-
       {/* ===== Footer ===== */}
       <footer className="border-t border-white/5 px-6 py-8">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 text-sm text-white/40">
@@ -395,13 +495,22 @@ export default function LandingPage() {
             <span className="hidden sm:inline">· voice workspace</span>
           </div>
           <div className="flex flex-wrap items-center gap-5">
-            <a href="#features" className="transition-colors hover:text-white/70">Features</a>
-            <a href="#how-it-works" className="transition-colors hover:text-white/70">How it works</a>
+            <a
+              href="#features"
+              className="transition-colors hover:text-white/70"
+            >
+              Features
+            </a>
+            <a
+              href="#how-it-works"
+              className="transition-colors hover:text-white/70"
+            >
+              How it works
+            </a>
             <span className="text-white/20">© {year ? `${year} ` : ''}Leo</span>
           </div>
         </div>
       </footer>
-
       {/* ===== Sign-in dialog ===== */}
       {showLogin && (
         <div
@@ -435,7 +544,10 @@ export default function LandingPage() {
             </div>
 
             <form onSubmit={submitSignIn} className="mt-5 space-y-3">
-              <label htmlFor="email" className="block text-xs font-medium text-white/50">
+              <label
+                htmlFor="email"
+                className="block text-xs font-medium text-white/50"
+              >
                 Email address
               </label>
               <input
@@ -485,7 +597,9 @@ function WorkspacePreview({ onTry }: { onTry: () => void }) {
           <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
-          <span className="ml-2 truncate text-[11px] text-white/40">leo — main.py</span>
+          <span className="ml-2 truncate text-[11px] text-white/40">
+            leo — main.py
+          </span>
           <span className="ml-auto flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-emerald-300">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             Live
@@ -498,7 +612,9 @@ function WorkspacePreview({ onTry }: { onTry: () => void }) {
             <div className="px-3 pb-1 text-[9px] font-semibold uppercase tracking-wider text-white/30">
               Explorer
             </div>
-            <div className="flex items-center gap-1 px-2 py-0.5 text-white/60">▾ src</div>
+            <div className="flex items-center gap-1 px-2 py-0.5 text-white/60">
+              ▾ src
+            </div>
             <div className="bg-[#37373d] px-4 py-0.5 text-white">main.py</div>
             <div className="px-4 py-0.5">utils.py</div>
             <div className="px-2 py-0.5">tests</div>
@@ -508,22 +624,36 @@ function WorkspacePreview({ onTry }: { onTry: () => void }) {
           {/* Code */}
           <div className="min-w-0 flex-1 bg-[#1e1e1e]">
             <div className="flex items-center gap-1 border-b border-black/30 px-2 text-[11px]">
-              <span className="border-b-2 border-[#635bff] px-2 py-1.5 text-white/85">main.py</span>
+              <span className="border-b-2 border-[#635bff] px-2 py-1.5 text-white/85">
+                main.py
+              </span>
               <span className="px-2 py-1.5 text-white/35">utils.py</span>
             </div>
             <pre className="overflow-hidden px-3 py-2.5 font-mono text-[11px] leading-[1.6] text-[#d4d4d4]">
-              <span className="syn-comment"># Describe the change, or edit by hand</span>{'\n'}
-              <span className="syn-keyword">from</span> fastapi <span className="syn-keyword">import</span> FastAPI{'\n\n'}
+              <span className="syn-comment">
+                # Describe the change, or edit by hand
+              </span>
+              {'\n'}
+              <span className="syn-keyword">from</span> fastapi{' '}
+              <span className="syn-keyword">import</span> FastAPI{'\n\n'}
               app = <span className="syn-function">FastAPI</span>(){'\n\n'}
-              <span className="syn-keyword">@app</span>.<span className="syn-function">get</span>(<span className="syn-string">&quot;/health&quot;</span>){'\n'}
-              <span className="syn-keyword">def</span> <span className="syn-function">health</span>():{'\n'}
-              {'    '}<span className="syn-keyword">return</span> {'{'}
-              <span className="syn-string">&quot;status&quot;</span>: <span className="syn-string">&quot;ok&quot;</span>{'}\n'}
+              <span className="syn-keyword">@app</span>.
+              <span className="syn-function">get</span>(
+              <span className="syn-string">&quot;/health&quot;</span>){'\n'}
+              <span className="syn-keyword">def</span>{' '}
+              <span className="syn-function">health</span>():{'\n'}
+              {'    '}
+              <span className="syn-keyword">return</span> {'{'}
+              <span className="syn-string">&quot;status&quot;</span>:{' '}
+              <span className="syn-string">&quot;ok&quot;</span>
+              {'}\n'}
             </pre>
             <div className="border-t border-black/30 bg-[#2d2d2d] px-2 py-1.5 font-mono text-[10px] leading-relaxed text-white/50">
               <span className="text-emerald-400">$ leo run main.py</span>
               <br />
-              <span className="text-white/60">INFO: Uvicorn running on http://127.0.0.1:8000</span>
+              <span className="text-white/60">
+                INFO: Uvicorn running on http://127.0.0.1:8000
+              </span>
               <br />
               <span className="text-white/35">GET /health → 200 OK</span>
             </div>
@@ -574,7 +704,16 @@ function WorkspacePreview({ onTry }: { onTry: () => void }) {
 
 function BrandMark() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 19v3" />
       <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
       <rect x="9" y="2" width="6" height="13" rx="3" />
@@ -584,7 +723,16 @@ function BrandMark() {
 
 function MicIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3" />
       <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
       <line x1="12" y1="19" x2="12" y2="23" />
@@ -594,7 +742,17 @@ function MicIcon() {
 
 function CheckIcon() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400/80">
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="text-emerald-400/80"
+    >
       <polyline points="20 6 9 17 4 12" />
     </svg>
   )
@@ -602,7 +760,16 @@ function CheckIcon() {
 
 function TreeIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" />
     </svg>
   )
@@ -610,7 +777,16 @@ function TreeIcon() {
 
 function CodeIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="16 18 22 12 16 6" />
       <polyline points="8 6 2 12 8 18" />
     </svg>
@@ -619,7 +795,16 @@ function CodeIcon() {
 
 function PlayIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polygon points="5 3 19 12 5 21 5 3" />
     </svg>
   )
@@ -627,7 +812,16 @@ function PlayIcon() {
 
 function TerminalIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
@@ -636,7 +830,16 @@ function TerminalIcon() {
 
 function CommandIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z" />
     </svg>
   )
@@ -644,7 +847,16 @@ function CommandIcon() {
 
 function QuoteIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z" />
       <path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z" />
     </svg>

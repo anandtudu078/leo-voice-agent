@@ -3,8 +3,10 @@ import { chromium } from 'playwright'
 const browser = await chromium.launch()
 const page = await browser.newPage()
 const errors = []
-page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
-page.on('pageerror', err => errors.push(err.message))
+page.on('console', (msg) => {
+  if (msg.type() === 'error') errors.push(msg.text())
+})
+page.on('pageerror', (err) => errors.push(err.message))
 
 try {
   // 1. Go to landing page
@@ -26,8 +28,11 @@ try {
   console.log('2. On /code page:', await page.title())
 
   // 4. Check for hydration errors
-  const hydrationErrors = errors.filter(e => e.includes('Hydration failed'))
-  console.log('3. Hydration errors:', hydrationErrors.length > 0 ? hydrationErrors : 'none')
+  const hydrationErrors = errors.filter((e) => e.includes('Hydration failed'))
+  console.log(
+    '3. Hydration errors:',
+    hydrationErrors.length > 0 ? hydrationErrors : 'none',
+  )
 
   // 5. Check the status badge is present
   const statusBadge = await page.$('div[class*="status"]')
@@ -44,14 +49,20 @@ try {
 
   // 7. Check the editor is enabled
   const editor = await page.$('.react-simple-code-editor')
-  const disabled = await editor?.evaluate(el => el.disabled)
-  console.log('7. Editor disabled:', disabled === true ? 'YES (BUG)' : 'no (editable)')
+  const disabled = await editor?.evaluate((el) => el.disabled)
+  console.log(
+    '7. Editor disabled:',
+    disabled === true ? 'YES (BUG)' : 'no (editable)',
+  )
 
   // 8. Sign out
   if (signOutBtn) {
     await signOutBtn.click()
     await page.waitForTimeout(1000)
-    console.log('8. Signed out, back to landing:', (await page.textContent('body'))?.includes('Project Workspace') === true)
+    console.log(
+      '8. Signed out, back to landing:',
+      (await page.textContent('body'))?.includes('Project Workspace') === true,
+    )
   }
 
   console.log('\n=== RESULT ===')

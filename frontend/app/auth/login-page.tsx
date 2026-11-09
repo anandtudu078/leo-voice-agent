@@ -1,28 +1,28 @@
-import { useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { LogIn, Mic } from "lucide-react";
+import { useState } from 'react'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { LogIn, Mic } from 'lucide-react'
 
 export default function LoginPage({
   onLogin,
   setAuth,
 }: {
-  onLogin: (email: string) => void;
-  setAuth: (value: "logging-in" | "logged-in" | "logged-out") => void;
+  onLogin: (email: string) => void
+  setAuth: (value: 'logging-in' | 'logged-in' | 'logged-out') => void
 }) {
-  const [email, setEmail] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+    e.preventDefault()
+    setError(null)
     if (!email.trim()) {
-      setError("Email is required");
-      return;
+      setError('Email is required')
+      return
     }
-    onLogin(email.trim());
-    setAuth("logged-in");
-  };
+    onLogin(email.trim())
+    setAuth('logged-in')
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -51,14 +51,14 @@ export default function LoginPage({
             required
           />
           <Button type="submit" disabled={error ? true : false}>
-            {error ? "Try again" : "Sign In"}
+            {error ? 'Try again' : 'Sign In'}
           </Button>
         </form>
 
         <p className="text-sm text-muted-foreground">
-          Don&apos;t have an account?{" "}
+          Don&apos;t have an account?{' '}
           <button
-            onClick={() => setAuth("logging-in")}
+            onClick={() => setAuth('logging-in')}
             className="underline underline-offset-2 hover:text-primary"
           >
             Sign up
@@ -66,5 +66,5 @@ export default function LoginPage({
         </p>
       </div>
     </div>
-  );
+  )
 }

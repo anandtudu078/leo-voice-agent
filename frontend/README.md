@@ -42,10 +42,10 @@ uv run main:app --reload --port 8000
 
 ## Workspaces & tools
 
-| Tool | Description |
-| --- | --- |
-| `read_file` | Read a file from the workspace |
-| `write_file` | Create / overwrite a file in the workspace |
+| Tool         | Description                                           |
+| ------------ | ----------------------------------------------------- |
+| `read_file`  | Read a file from the workspace                        |
+| `write_file` | Create / overwrite a file in the workspace            |
 | `run_script` | Execute a `.py` / `.js` script in an isolated sandbox |
 
 Environment variables are loaded from `.env`:

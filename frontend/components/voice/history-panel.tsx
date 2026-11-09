@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
-import { History } from "lucide-react";
+import { useState, useEffect } from 'react'
+import { History } from 'lucide-react'
 
 export interface VoiceTurn {
-  id: number;
-  transcript: string;
-  reply: string;
-  created_at: string;
+  id: number
+  transcript: string
+  reply: string
+  created_at: string
 }
 
 export function VoiceHistory({ turns }: { turns: VoiceTurn[] }) {
@@ -28,5 +28,5 @@ export function VoiceHistory({ turns }: { turns: VoiceTurn[] }) {
         <p className="text-sm text-muted-foreground">No voice history yet</p>
       )}
     </div>
-  );
+  )
 }

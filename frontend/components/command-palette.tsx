@@ -1,27 +1,27 @@
-import { useState } from "react";
-import { Search } from "lucide-react";
+import { useState } from 'react'
+import { Search } from 'lucide-react'
 
 export function CommandPalette() {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const [recentCommands, setRecentCommands] = useState([
-    { name: "New Project", description: "Create a new project" },
-    { name: "Open File", description: "Open an existing file" },
-    { name: "Refactor", description: "Refactor selected code" },
-    { name: "Debug", description: "Debug current execution" },
-    { name: "New Terminal", description: "Open a new terminal" },
-  ]);
+    { name: 'New Project', description: 'Create a new project' },
+    { name: 'Open File', description: 'Open an existing file' },
+    { name: 'Refactor', description: 'Refactor selected code' },
+    { name: 'Debug', description: 'Debug current execution' },
+    { name: 'New Terminal', description: 'Open a new terminal' },
+  ])
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQuery(e.target.value);
-  };
+    setQuery(e.target.value)
+  }
 
   const executeCommand = (command: string) => {
-    setOpen(false);
-    setQuery("");
+    setOpen(false)
+    setQuery('')
     // Execute the command
-    console.log("Executing:", command);
-  };
+    console.log('Executing:', command)
+  }
 
   return (
     <div>
@@ -45,7 +45,9 @@ export function CommandPalette() {
                   className="rounded-md p-1 hover:bg-accent"
                   aria-label="Close command palette"
                 >
-                  <span className="slash-through line-through opacity-40">/</span>
+                  <span className="slash-through line-through opacity-40">
+                    /
+                  </span>
                 </button>
               </div>
 
@@ -68,7 +70,9 @@ export function CommandPalette() {
                   >
                     <div className="w-3 h-3 rounded-full bg-primary" />
                     <span className="flex-1">{cmd.name}</span>
-                    <span className="text-xs text-muted-foreground">{cmd.description}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {cmd.description}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -81,5 +85,5 @@ export function CommandPalette() {
         </div>
       )}
     </div>
-  );
+  )
 }
