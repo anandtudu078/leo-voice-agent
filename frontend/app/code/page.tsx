@@ -132,6 +132,7 @@ function CodeSpaceShell({
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [transcript, setTranscript] = useState('')
   const [logs, setLogs] = useState<string[]>([])
+  const [activeLog, setActiveLog] = useState(0)
   const [loading, setLoading] = useState(false)
   const [recording, setRecording] = useState(false)
   const [loadingTree, setLoadingTree] = useState(true)
@@ -423,6 +424,26 @@ function CodeSpaceShell({
 
   // Process autonomous voice commands:
   useEffect(() => {
+    // Listen for transcript from WebSocket and auto-detect commands
+    if (transcript.trim()) {
+      // Parse the transcript using the backend /api/parse-voice-command
+      fetch('/api/parse-voice-command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({transcript: transcript.trim()})
+      })
+      .then(async (res) => {
+        const data = await res.json()
+        if (data.action && data.action !== 'none' && socketRef.current?.readyState === WebSocket.OPEN) {
+          setAutoCommand(data.action)
+          setAutoCommandPayload(data.payload || null)
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to parse voice command:', err)
+      })
+    }
+    // Handle autonomous command dispatch
     if (autoCommand === 'createFile' && socketRef.current?.readyState === WebSocket.OPEN) {
       const path = autoCommandPayload?.path || 'untitled.py'
       const code = autoCommandPayload?.code || ''
@@ -440,13 +461,21 @@ function CodeSpaceShell({
       setAutoCommand(null)
       setAutoCommandPayload(null)
     }
+    if (autoCommand === 'editFile' && socketRef.current?.readyState === WebSocket.OPEN) {
+      const path = autoCommandPayload?.path || ''
+      socketRef.current.send(JSON.stringify({type: 'editFile', path}))
+      pushMessage('leo', '> Edited ' + path)
+      pushLog('> Edited ' + path)
+      setAutoCommand(null)
+      setAutoCommandPayload(null)
+    }
     if (autoCommand === 'runFile' && socketRef.current?.readyState === WebSocket.OPEN) {
       const path = autoCommandPayload?.path || ''
       socketRef.current.send(JSON.stringify({type: 'run_script', path}))
       setAutoCommand(null)
       setAutoCommandPayload(null)
     }
-  }, [autoCommand, autoCommandPayload, socketRef])
+  }, [transcript, autoCommand, autoCommandPayload, socketRef])
   // ---- File operations (HTTP workspace API) ----
   const openFile = async (path: string) => {
     if (tabs.some((tab) => tab.path === path)) {
@@ -916,11 +945,26 @@ function CodeSpaceShell({
             )}
 
             {panelTab === 'terminal' && (
-              <div className="flex flex-col h-full min-h-0 font-mono text-xs">
+              <div className="flex flex-col h-full min-h-0 font-mono text-xs" tabindex="0" onKeyDown={(e) => {
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  // Navigate up in terminal history - move focus to previous log
+                  setActiveLog((prev) => prev > 0 ? prev - 1 : logs.length - 1)
+                }
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  // Navigate down in terminal history - move focus to next log
+                  setActiveLog((prev) => prev < logs.length - 1 ? prev + 1 : 0)
+                }
+              }}">
                 <div className="text-white/40 shrink-0">Leo sandbox terminal</div>
-                <div className="flex-1 min-h-0 overflow-y-auto text-white/55 space-y-0.5 mt-1">
+                <div className="flex-1 min-h-0 overflow-y-auto text-white/55 space-y-0.5 mt-1" role="dialog" aria-label="Terminal log">
                   {logs.map((log, i) => (
-                    <div key={i} className="whitespace-pre-wrap">
+                    <div key={i} className={
+                      i === activeLog
+                        ? 'whitespace-pre-wrap bg-[#635bff]/20'
+                        : 'whitespace-pre-wrap'
+                    }>
                       {log}
                     </div>
                   ))}
