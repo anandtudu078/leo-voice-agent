@@ -700,6 +700,7 @@ async def websocket_process_voice(websocket: WebSocket):
                     await asyncio.to_thread(
                         repository.save_file_snapshot, workspace_id, path, code
                     )
+                await websocket.send_json({"type": "file", "path": path, "content": code})
                 await websocket.send_json(
                     {
                         "type": "logs",
