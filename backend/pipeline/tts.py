@@ -1,17 +1,30 @@
-"""Gnani Prisma text-to-speech client.
+"""Gnani Timbre text-to-speech client.
 
-Wraps the Gnani TTS HTTP API so the controller only talks to this module.
-Returns raw audio bytes; the WebSocket controller decides how to hand them
-to the browser (byte-fragmented encodeURIComponent payload inside JSON).
+Wraps the Gnani TTS REST API so the controller only talks to this module.
+The endpoint returns the synthesised audio as raw bytes (WAV by default),
+which the WebSocket controller base64-encodes for the browser.
+
+Docs: https://docs.gnani.ai/api/TTS/tts-inference
 """
 
 from __future__ import annotations
 
 import os
+
 import requests
 
-GNANI_TTS_URL = os.getenv("GNANI_TTS_URL", "https://api.vachana.ai/tts/v3")
+GNANI_TTS_URL = os.getenv(
+    "GNANI_TTS_URL", "https://api.vachana.ai/api/v1/tts/inference"
+)
 GNANI_API_KEY = os.getenv("GNANI_API_KEY")
+DEFAULT_MODEL = os.getenv("GNANI_TTS_MODEL", "timbre-v2.5")
+# Voices belong to a model: v2.5 ships Nalini, Kaveri, Deepak, Poorvi; v3.0
+# ships Shivani, Avinash, Lakshmi. Kaveri is the English v2.5 voice.
+DEFAULT_VOICE = os.getenv("GNANI_TTS_VOICE", "Kaveri")
+DEFAULT_LANGUAGE = os.getenv("GNANI_TTS_LANGUAGE", "en-IN")
+
+# 24 kHz keeps the base64 payload small while staying speech-quality.
+SAMPLE_RATE = 24000
 
 
 class GnaniTTSError(Exception):
@@ -19,17 +32,21 @@ class GnaniTTSError(Exception):
 
 
 class GnaniTTSClient:
-    """Thin client around the Gnani TTS HTTP API."""
+    """Thin client around the Gnani TTS REST API."""
 
     def __init__(
         self,
         api_key: str | None = None,
         base_url: str = GNANI_TTS_URL,
-        voice: str = "aura-aria",
+        voice: str = DEFAULT_VOICE,
+        model: str = DEFAULT_MODEL,
+        language: str = DEFAULT_LANGUAGE,
     ) -> None:
         self.api_key = api_key or GNANI_API_KEY
         self.base_url = base_url.rstrip("/")
         self.voice = voice
+        self.model = model
+        self.language = language
 
         if not self.api_key:
             raise GnaniTTSError("GNANI_API_KEY is not configured")
@@ -41,30 +58,32 @@ class GnaniTTSClient:
         voice: str | None = None,
         speed: float = 1.0,
     ) -> bytes:
-        """Return raw audio bytes for ``text``.
-
-        Args:
-            text: The text to synthesise.
-            voice: Optional voice override (defaults to the client voice).
-            speed: Speech rate multiplier.
-
-        Returns:
-            Raw audio file bytes.
+        """Return WAV audio bytes for ``text``.
 
         Raises:
             GnaniTTSError: If the Gnani TTS API rejects the request.
         """
         if not self.api_key:
             raise GnaniTTSError("GNANI_API_KEY is not configured")
+        if not text.strip():
+            return b""
 
         payload = {
             "text": text,
             "voice": voice or self.voice,
+            "model": self.model,
+            "language": self.language,
             "speed": speed,
-            "response_format": "mp3",
+            "audio_config": {
+                "sample_rate": SAMPLE_RATE,
+                "num_channels": 1,
+                "sample_width": 2,
+                "encoding": "linear_pcm",
+                "container": "wav",
+            },
         }
-
         headers = {"X-API-Key-ID": self.api_key}
+
         try:
             response = requests.post(
                 self.base_url,
@@ -76,36 +95,38 @@ class GnaniTTSClient:
             raise GnaniTTSError(f"Gnani TTS request failed: {exc}") from exc
 
         if response.status_code != 200:
-            detail = response.text or f"Gnani TTS returned HTTP {response.status_code}"
-            raise GnaniTTSError(detail)
+            raise GnaniTTSError(self._error_detail(response))
 
+        content_type = response.headers.get("content-type", "")
+        if content_type.startswith("application/json") or response.content[:1] == b"{":
+            # A 200 with JSON is an error envelope, not audio.
+            raise GnaniTTSError(self._error_detail(response))
+
+        if not response.content:
+            raise GnaniTTSError("Gnani TTS returned empty audio")
+
+        return response.content
+
+    @staticmethod
+    def _error_detail(response: requests.Response) -> str:
+        """Flatten Gnani's error shapes into one readable sentence."""
         try:
-            payload_body = response.json()
-        except ValueError as exc:
-            raise GnaniTTSError("Gnani TTS returned a non-JSON response") from exc
-        if not isinstance(payload_body, dict) or "audio" not in payload_body:
-            detail = (
-                payload_body.get("error")
-                or payload_body.get("message")
-                or "Unexpected Gnani TTS response"
-            )
-            raise GnaniTTSError(detail)
+            payload = response.json()
+        except ValueError:
+            return response.text or f"Gnani TTS returned HTTP {response.status_code}"
 
-        audio = payload_body["audio"]
-        if isinstance(audio, dict) and "b64" in audio and "ext" in audio:
-            # The API may return base64 audio + file extension.
-            import base64
-
-            return base64.b64decode(audio["b64"])
-
-        if isinstance(audio, str):
-            # Some Gnani TTS endpoints return a bare base64 payload.
-            import base64
-
-            return base64.b64decode(audio)
-
-        # Fall back to raw bytes if the payload is already bytes-like.
-        if hasattr(audio, "read"):
-            return audio.read()
-
-        raise GnaniTTSError("Unsupported Gnani TTS audio payload format")
+        if isinstance(payload, dict):
+            detail = payload.get("detail")
+            if isinstance(detail, dict):
+                return str(detail.get("message") or detail.get("error_code") or detail)
+            if isinstance(detail, str):
+                return detail
+            error = payload.get("error")
+            if isinstance(error, dict):
+                return str(error.get("message") or error)
+            if isinstance(error, str):
+                return error
+            message = payload.get("message")
+            if isinstance(message, str):
+                return message
+        return str(payload) or f"Gnani TTS returned HTTP {response.status_code}"
