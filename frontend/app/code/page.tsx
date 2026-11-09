@@ -259,22 +259,37 @@ function CodeSpaceShell({
     const fallbackUrls = [
       'https://leo-voice-agent.onrender.com',
       'https://leo-voice-agent.onrender.com',
+      'https://leo-voice-agent.onrender.com',
     ]
     const resolveBackendUrl = () => {
       const fromEnv = (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim()
-      if (fromEnv) return fromEnv.replace(/\/+$/, '').replace(/\/api$/, '')
+      if (fromEnv) {
+        // If env contains spaces or multiple URLs, take the first valid http(s) URL
+        const first = fromEnv.split(/\s+/)[0]
+        return first.replace(/\/+$/, '').replace(/\/api\/?$/, '')
+      }
       if (typeof window !== 'undefined') {
         const host = window.location.hostname
         if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000'
       }
       return fallbackUrls[wsFallbackIndexRef.current] || fallbackUrls[0]
     }
-    const backendUrl = resolveBackendUrl()
-    const wsUrl = `${backendUrl.replace(/^http/i, 'ws')}/ws/process-voice`
+    let backendUrl = resolveBackendUrl()
+    // Extra sanitization: if it contains spaces or is malformed, fall back
+    if (backendUrl.includes(' ') || !/^https?:\/\//i.test(backendUrl)) {
+      backendUrl = 'https://leo-voice-agent.onrender.com'
+    }
+    const wsUrl = `${backendUrl.replace(/^http/i, 'ws').replace(/\/+$/, '')}/ws/process-voice`
+    try {
+      console.log('[voice] connecting to', wsUrl)
+    } catch {}
     const ws = new WebSocket(wsUrl)
     socketRef.current = ws
 
     ws.onopen = () => {
+      try {
+        console.log('[voice] connected')
+      } catch {}
       wsFallbackIndexRef.current = 0
       wsTriedFallbackRef.current = false
       setVoiceStatus('ready')
@@ -320,7 +335,13 @@ function CodeSpaceShell({
             break
           case 'file':
             if (typeof msg.path === 'string' && msg.path) {
-              adoptFile(msg.path, typeof msg.content === 'string' ? msg.content : '')
+              const p = msg.path
+              adoptFile(p, typeof msg.content === 'string' ? msg.content : '')
+              setFiles((prev) => {
+                if (prev.some((f) => f.path === p)) return prev
+                const name = p.split('/').pop() || p
+                return [...prev, { path: p, name, kind: 'file' as const }].sort((a, b) => a.path.localeCompare(b.path))
+              })
             }
             break
           case 'transcript':
@@ -417,7 +438,10 @@ function CodeSpaceShell({
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      try {
+        console.log('[voice] closed', ev?.code, ev?.reason)
+      } catch {}
       // Try a fallback backend once if the primary failed to connect.
       if (!wsTriedFallbackRef.current && wsFallbackIndexRef.current === 0) {
         wsTriedFallbackRef.current = true
@@ -439,7 +463,10 @@ function CodeSpaceShell({
       }
     }
 
-    ws.onerror = () => {
+    ws.onerror = (ev) => {
+      try {
+        console.log('[voice] error')
+      } catch {}
       if (!wsTriedFallbackRef.current && wsFallbackIndexRef.current === 0) {
         wsTriedFallbackRef.current = true
         wsFallbackIndexRef.current = 1
