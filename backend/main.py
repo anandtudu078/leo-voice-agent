@@ -206,7 +206,7 @@ async def parse_voice_command(request: Request):
             if "create a file" in tl or "new file" in tl:
                 # extract path after "create a file" or "new file"
                 import re
-                m = re.search(r"create a file (.+?)(\\.\\w+)?|new file (.+?)(\\.\\w+)?", tl)
+                m = re.search(r"create a file (.+?)(\.\.\.\w+)?|new file (.+?)(\.\.\.\w+)?", tl)
                 if m:
                     path = (m.group(1) or m.group(3)).strip()
                     code = m.group(2) or m.group(4) or ""
@@ -220,12 +220,21 @@ async def parse_voice_command(request: Request):
                     action = "createFolder"
                     payload = {"path": path}
             elif "run" in tl or "execute" in tl:
-                import re
-                m = re.search(r"run (\\.\\w+)|execute (\\.\\w+)", tl)
-                if m:
-                    path = m.group(1) or m.group(2)
-                    action = "runFile"
-                    payload = {"path": path}
+                # Check for edit file first (more specific), then run/execute
+                if "edit a file" in tl or "modify a file" in tl or ("change" in tl.lower() and "file" in tl.lower()):
+                    import re
+                    m = re.search(r"(?:edit|modify|change) (?:a |the )?file (.+?)(\.\.\w+)?", tl)
+                    if m:
+                        path = m.group(1).strip()
+                        action = "editFile"
+                        payload = {"path": path}
+                elif re.search(r"run (\.\.\.\w+)|execute (\.\.\.\w+)", tl):
+                    import re
+                    m = re.search(r"run (\.\.\.\w+)|execute (\.\.\.\w+)", tl)
+                    if m:
+                        path = m.group(1) or m.group(2)
+                        action = "runFile"
+                        payload = {"path": path}
             if not action:
                 action = "none"
                 payload = None
