@@ -409,3 +409,15 @@ body {
 .ide-editor-pane textarea::selection {
   background: rgba(99, 91, 255, 0.35);
 }
+
+/* Line-by-line code explanation (v1) */
+.ide-explain-highlight {
+  background: rgba(99, 91, 255, 0.14);
+  border-left: 2px solid rgba(99, 91, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(99, 91, 255, 0.08);
+  z-index: 0;
+}
+.ide-line-numbers .ide-line-explain-active {
+  color: #c9c4ff;
+  background: rgba(99, 91, 255, 0.12);
+}

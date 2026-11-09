@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import Editor from 'react-simple-code-editor'
 
 import { highlightCode, languageForPath } from '@/lib/highlight'
@@ -10,6 +11,11 @@ interface Tab {
   dirty: boolean
 }
 
+interface ExplainRange {
+  startLine: number
+  endLine: number
+}
+
 interface EditorAreaProps {
   tabs: Tab[]
   activeTab: string | null
@@ -17,11 +23,13 @@ interface EditorAreaProps {
   onContentChange: (code: string) => void
   onSave: () => void
   onRun: () => void
+  onExplain?: () => void
   onTabClick: (path: string) => void
   onTabClose: (path: string) => void
   onCursorChange?: (line: number, col: number) => void
   running?: boolean
   disabled?: boolean
+  explainRange?: ExplainRange | null
 }
 
 const EDITOR_LINE_HEIGHT = 20
@@ -33,14 +41,29 @@ export function EditorArea({
   onContentChange,
   onSave,
   onRun,
+  onExplain,
   onTabClick,
   onTabClose,
   onCursorChange,
   running = false,
   disabled = false,
+  explainRange = null,
 }: EditorAreaProps) {
+  const paneRef = useRef<HTMLDivElement | null>(null)
   const lines = content.split('\n')
   const language = languageForPath(activeTab)
+
+  useEffect(() => {
+    if (!explainRange || !paneRef.current) return
+    const top = 12 + (explainRange.startLine - 1) * EDITOR_LINE_HEIGHT
+    const pane = paneRef.current
+    const viewTop = pane.scrollTop
+    const viewBottom = viewTop + pane.clientHeight
+    const targetBottom = top + (explainRange.endLine - explainRange.startLine + 1) * EDITOR_LINE_HEIGHT
+    if (top < viewTop + 24 || targetBottom > viewBottom - 24) {
+      pane.scrollTo({ top: Math.max(0, top - 48), behavior: 'smooth' })
+    }
+  }, [explainRange])
 
   const reportCursor = (element: HTMLTextAreaElement | HTMLDivElement) => {
     if (!onCursorChange || !(element instanceof HTMLTextAreaElement)) return
@@ -105,6 +128,16 @@ export function EditorArea({
           >
             Save
           </button>
+          {onExplain && (
+            <button
+              onClick={onExplain}
+              disabled={!activeTab || disabled}
+              className="text-xs px-2.5 py-1 rounded bg-white/5 text-white/75 border border-white/10 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10 hover:text-white transition-colors"
+              title="Explain this code line by line"
+            >
+              Explain
+            </button>
+          )}
           <button
             onClick={onRun}
             disabled={!activeTab || disabled || running}
@@ -118,13 +151,29 @@ export function EditorArea({
 
       {/* Gutter and code scroll together inside one pane */}
       {activeTab ? (
-        <div className="ide-editor-pane">
+        <div className="ide-editor-pane" ref={paneRef}>
           <div className="ide-line-numbers" aria-hidden="true">
-            {lines.map((_, i) => (
-              <div key={i}>{i + 1}</div>
-            ))}
+            {lines.map((_, i) => {
+              const n = i + 1
+              const active = !!explainRange && n >= explainRange.startLine && n <= explainRange.endLine
+              return (
+                <div key={i} className={active ? 'ide-line-explain-active' : undefined}>
+                  {n}
+                </div>
+              )
+            })}
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 relative">
+            {explainRange && (
+              <div
+                aria-hidden="true"
+                className="ide-explain-highlight pointer-events-none absolute left-0 right-0"
+                style={{
+                  top: 12 + (explainRange.startLine - 1) * EDITOR_LINE_HEIGHT,
+                  height: (explainRange.endLine - explainRange.startLine + 1) * EDITOR_LINE_HEIGHT,
+                }}
+              />
+            )}
             <Editor
               value={content}
               onValueChange={onContentChange}

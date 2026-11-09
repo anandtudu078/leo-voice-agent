@@ -25,6 +25,70 @@ import {
 
 type EditorTab = { path: string; content: string; saved: string }
 
+type ExplanationStep = {
+  startLine: number
+  endLine: number
+  title: string
+  what: string
+  why: string
+  syntax?: string[]
+  code?: string
+}
+
+type PendingExplanation = {
+  path: string
+  code: string
+  language: string
+  goal: string
+}
+
+type ExplanationState = {
+  path: string
+  language: string
+  goal: string
+  steps: ExplanationStep[]
+  index: number
+  loading: boolean
+  error: string | null
+}
+
+function classifyExplanationResponse(text: string): 'agree' | 'decline' | 'other' {
+  const t = text.trim().toLowerCase()
+  if (!t) return 'other'
+  const agree = /\b(yes|yeah|yep|sure|ok|okay|explain|teach|walk\s*me|go\s*ahead|please\s+explain|show\s+me)\b/
+  const decline = /\b(no|nope|nah|skip|not\s+now|continue|later|don'?t|do\s+not)\b/
+  const hasAgree = agree.test(t)
+  const hasDecline = decline.test(t)
+  // "no, run it" / "continue and run" => treat as other command (continue based on voice command)
+  const commandy = /\b(run|create|write|edit|open|delete|rename|save|build|fix|change|add|make|show|list)\b/
+  if (hasDecline && commandy.test(t)) return 'other'
+  if (hasAgree && !hasDecline) return 'agree'
+  if (hasDecline && !hasAgree) return 'decline'
+  if (hasAgree && hasDecline) return commandy.test(t) ? 'other' : 'decline'
+  return 'other'
+}
+
+async function fetchExplanation(payload: {
+  path: string
+  code: string
+  language: string
+  goal: string
+}): Promise<ExplanationStep[]> {
+  const res = await fetch('/api/explain-code', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail = (data as { detail?: string }).detail || `Explanation failed (HTTP ${res.status})`
+    throw new Error(detail)
+  }
+  const steps = (data as { steps?: ExplanationStep[] }).steps
+  return Array.isArray(steps) ? steps : []
+}
+
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -151,6 +215,21 @@ function CodeSpaceShell({
   const [autoCommandPayload, setAutoCommandPayload] = useState<{path?: string, code?: string} | null>(null)
   const [folderSelectMode, setFolderSelectMode] = useState<'none' | 'ask' | 'chosen'>('none')
   const [commandInput, setCommandInput] = useState('')
+  const [pendingExplanation, setPendingExplanation] = useState<PendingExplanation | null>(null)
+  const [explanation, setExplanation] = useState<ExplanationState | null>(null)
+  const [lastUserGoal, setLastUserGoal] = useState('')
+
+  const pendingExplanationRef = useRef<PendingExplanation | null>(null)
+  const lastUserGoalRef = useRef('')
+  const skipNextAutoParseRef = useRef<string | null>(null)
+  const explainedPathsRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    pendingExplanationRef.current = pendingExplanation
+  }, [pendingExplanation])
+  useEffect(() => {
+    lastUserGoalRef.current = lastUserGoal
+  }, [lastUserGoal])
 
   const messageIdRef = useRef(0)
   const offlineRef = useRef(false)
@@ -176,6 +255,13 @@ function CodeSpaceShell({
 
   const activeTab = activeFile
   const activeContent = tabs.find((tab) => tab.path === activeFile)?.content ?? ''
+  const activeExplainRange =
+    explanation && explanation.path === activeFile && explanation.steps[explanation.index]
+      ? {
+          startLine: explanation.steps[explanation.index].startLine,
+          endLine: explanation.steps[explanation.index].endLine,
+        }
+      : null
   const openTabs = tabs.map((tab) => ({
     path: tab.path,
     label: baseName(tab.path),
@@ -214,6 +300,81 @@ function CodeSpaceShell({
     setActiveFile(path)
     setCursor({ line: 1, col: 1 })
   }, [])
+
+  const dismissPendingExplanation = useCallback(() => {
+    setPendingExplanation(null)
+  }, [])
+
+  const startExplanation = useCallback(
+    async (pending?: PendingExplanation | null) => {
+      const target = pending || pendingExplanationRef.current
+      if (!target || !target.code.trim()) return
+      const goal = target.goal || lastUserGoalRef.current || ''
+      const path = target.path
+      setPendingExplanation(null)
+      setExplanation({
+        path,
+        language: target.language || 'code',
+        goal,
+        steps: [],
+        index: 0,
+        loading: true,
+        error: null,
+      })
+      pushMessage('leo', `Explaining ${baseName(path)} line by line…`)
+      setPanelOpen(true)
+      setPanelTab('voice')
+      try {
+        const steps = await fetchExplanation({
+          path,
+          code: target.code,
+          language: target.language,
+          goal,
+        })
+        setExplanation((prev) =>
+          prev && prev.path === path
+            ? { ...prev, steps, index: 0, loading: false, error: null }
+            : prev,
+        )
+        if (!steps.length) {
+          setExplanation((prev) =>
+            prev && prev.path === path
+              ? { ...prev, loading: false, error: 'No explanation steps were generated.' }
+              : prev,
+          )
+        }
+      } catch (err) {
+        const message = describeError(err)
+        setExplanation((prev) =>
+          prev && prev.path === path ? { ...prev, loading: false, error: message } : prev,
+        )
+        pushLog(`ERROR: could not explain ${path} — ${message}`)
+      }
+    },
+    [pushLog, pushMessage],
+  )
+
+  const respondToPendingExplanation = useCallback(
+    (text: string): boolean => {
+      const pending = pendingExplanationRef.current
+      if (!pending) return false
+      const kind = classifyExplanationResponse(text)
+      if (kind === 'agree') {
+        pushMessage('leo', `Sure — I’ll explain ${baseName(pending.path)} and its syntax.`)
+        void startExplanation(pending)
+        return true
+      }
+      if (kind === 'decline') {
+        setPendingExplanation(null)
+        pushMessage('leo', 'Okay, I’ll skip the explanation. Tell me what to do next.')
+        return true
+      }
+      // Other command: dismiss prompt and let normal command handling continue.
+      setPendingExplanation(null)
+      return false
+    },
+    [pushMessage, startExplanation],
+  )
 
   const refreshTree = useCallback(async () => {
     try {
@@ -336,21 +497,54 @@ function CodeSpaceShell({
           case 'file':
             if (typeof msg.path === 'string' && msg.path) {
               const p = msg.path
-              adoptFile(p, typeof msg.content === 'string' ? msg.content : '')
+              const content = typeof msg.content === 'string' ? msg.content : ''
+              adoptFile(p, content)
               setFiles((prev) => {
                 if (prev.some((f) => f.path === p)) return prev
                 const name = p.split('/').pop() || p
                 return [...prev, { path: p, name, kind: 'file' as const }].sort((a, b) => a.path.localeCompare(b.path))
               })
+              // v1: after the agent writes code, ask before explaining it.
+              if (content.trim() && !explainedPathsRef.current.has(p)) {
+                explainedPathsRef.current.add(p)
+                const goal = lastUserGoalRef.current || transcript || ''
+                const language = p.endsWith('.py') ? 'python' : p.endsWith('.ts') || p.endsWith('.tsx') ? 'typescript' : p.endsWith('.js') || p.endsWith('.jsx') ? 'javascript' : 'code'
+                setPendingExplanation({ path: p, code: content, language, goal })
+                pushMessage('leo', `I’ve written ${baseName(p)}. Should I explain the code and syntax line by line?`)
+                setPanelOpen(true)
+                setPanelTab('voice')
+              }
             }
             break
-          case 'transcript':
-            setTranscript(msg.transcript || '')
-            pushMessage('user', msg.transcript || '')
+          case 'transcript': {
+            const t = msg.transcript || ''
+            setTranscript(t)
+            pushMessage('user', t)
+            setLastUserGoal(t)
+            lastUserGoalRef.current = t
             setVoiceStatus('ready')
             setSttStatus('idle')
+            // v1: if Leo asked to explain code, handle yes/no here; other commands continue.
+            if (pendingExplanationRef.current && t.trim()) {
+              const kind = classifyExplanationResponse(t)
+              if (kind === 'agree') {
+                skipNextAutoParseRef.current = t
+                pushMessage('leo', `Sure — I’ll explain ${baseName(pendingExplanationRef.current.path)} and its syntax.`)
+                void startExplanation(pendingExplanationRef.current)
+                break
+              }
+              if (kind === 'decline') {
+                skipNextAutoParseRef.current = t
+                setPendingExplanation(null)
+                pushMessage('leo', 'Okay, I’ll skip the explanation. Tell me what to do next.')
+                break
+              }
+              // "other" => clear prompt and let autonomous command parsing proceed.
+              setPendingExplanation(null)
+            }
             // Autonomous command processing is handled by a useEffect below
             break
+          }
           case 'code':
             setLogs((prev) => [...prev, `{ Agent: ${msg.code || ''} }`])
             if (msg.code && msg.code.includes('FileContent')) {
@@ -516,24 +710,30 @@ function CodeSpaceShell({
     // Listen for transcript from WebSocket and auto-detect commands
     const trimmed = transcript.trim()
     if (trimmed && trimmed !== lastParsedTranscriptRef.current) {
-      lastParsedTranscriptRef.current = trimmed
-      // Parse the transcript using the backend /api/parse-voice-command
-      fetch('/api/parse-voice-command', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({transcript: trimmed})
-      })
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}))
-        if (data.action && data.action !== 'none') {
-          // Store the action and payload for autonomous dispatch when socket is ready
-          setAutoCommand(data.action)
-          setAutoCommandPayload(data.payload || null)
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to parse voice command:', err)
-      })
+      if (skipNextAutoParseRef.current && skipNextAutoParseRef.current === trimmed) {
+        lastParsedTranscriptRef.current = trimmed
+        skipNextAutoParseRef.current = null
+        // handled (explain yes/no)
+      } else {
+        lastParsedTranscriptRef.current = trimmed
+        // Parse the transcript using the backend /api/parse-voice-command
+        fetch('/api/parse-voice-command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript: trimmed }),
+        })
+          .then(async (res) => {
+            const data = await res.json().catch(() => ({}))
+            if (data.action && data.action !== 'none') {
+              // Store the action and payload for autonomous dispatch when socket is ready
+              setAutoCommand(data.action)
+              setAutoCommandPayload(data.payload || null)
+            }
+          })
+          .catch((err) => {
+            console.error('Failed to parse voice command:', err)
+          })
+      }
     }
     // Handle autonomous command dispatch - do not check socket readiness here,
     // the dispatch happens when the effect re-runs after socket connects
@@ -813,6 +1013,31 @@ function CodeSpaceShell({
   const sendTextCommand = async () => {
     const text = commandInput.trim()
     if (!text) return
+    setLastUserGoal(text)
+    lastUserGoalRef.current = text
+
+    // v1: handle permission to explain code/syntax after Leo writes code.
+    if (pendingExplanationRef.current) {
+      const kind = classifyExplanationResponse(text)
+      if (kind === 'agree') {
+        pushMessage('user', text)
+        pushMessage('leo', `Sure — I’ll explain ${baseName(pendingExplanationRef.current.path)} and its syntax.`)
+        void startExplanation(pendingExplanationRef.current)
+        setCommandInput('')
+        setPanelTab('voice')
+        return
+      }
+      if (kind === 'decline') {
+        pushMessage('user', text)
+        setPendingExplanation(null)
+        pushMessage('leo', 'Okay, I’ll skip the explanation. Tell me what to do next.')
+        setCommandInput('')
+        setPanelTab('voice')
+        return
+      }
+      // Other command/text: dismiss the prompt and continue with normal handling.
+      setPendingExplanation(null)
+    }
 
     // Conversational file creation assistant
     const createFileRegex = /(create|new)\s+a?\s+file/i
@@ -1004,6 +1229,96 @@ function CodeSpaceShell({
         )}
 
         <section className="flex-1 flex flex-col min-w-0 min-h-0">
+          {pendingExplanation && (
+            <div className="mx-2 mt-2 rounded-lg border border-[#635bff]/35 bg-[#635bff]/10 px-3 py-2 text-xs text-white/85">
+              <div className="font-medium text-white">
+                I’ve written <span className="font-mono">{baseName(pendingExplanation.path)}</span>. Should I explain the code and syntax line by line?
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    pushMessage('leo', `Sure — I’ll explain ${baseName(pendingExplanation.path)} and its syntax.`)
+                    void startExplanation(pendingExplanation)
+                  }}
+                  className="rounded bg-[#635bff] px-2.5 py-1 text-xs font-medium text-white hover:bg-[#7c6cff]"
+                >
+                  Yes, explain
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingExplanation(null)
+                    pushMessage('leo', 'Okay, I’ll skip the explanation. Tell me what to do next.')
+                  }}
+                  className="rounded border border-white/15 bg-white/5 px-2.5 py-1 text-xs text-white/80 hover:bg-white/10"
+                >
+                  No, continue
+                </button>
+                <span className="text-[11px] text-white/45">You can also answer by voice or type “yes” / “no”.</span>
+              </div>
+            </div>
+          )}
+          {explanation && (
+            <div className="mx-2 mt-2 rounded-lg border border-white/10 bg-[#252526] px-3 py-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-white/90">
+                    Code walkthrough: <span className="font-mono">{baseName(explanation.path)}</span>
+                  </div>
+                  <div className="text-[11px] text-white/45">
+                    {explanation.loading
+                      ? 'Preparing explanation…'
+                      : explanation.error
+                        ? 'Explanation issue'
+                        : explanation.steps.length
+                          ? `Step ${Math.min(explanation.index + 1, explanation.steps.length)} of ${explanation.steps.length} · lines ${explanation.steps[explanation.index]?.startLine}-${explanation.steps[explanation.index]?.endLine}`
+                          : 'No steps'}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={explanation.loading || explanation.index <= 0}
+                    onClick={() => setExplanation((prev) => prev && ({ ...prev, index: Math.max(0, prev.index - 1) }))}
+                    className="rounded border border-white/10 px-2 py-1 text-white/70 disabled:opacity-40 hover:bg-white/5"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    disabled={explanation.loading || explanation.index >= explanation.steps.length - 1}
+                    onClick={() => setExplanation((prev) => prev && ({ ...prev, index: Math.min(prev.steps.length - 1, prev.index + 1) }))}
+                    className="rounded border border-white/10 px-2 py-1 text-white/70 disabled:opacity-40 hover:bg-white/5"
+                  >
+                    Next
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExplanation(null)}
+                    className="rounded border border-white/10 px-2 py-1 text-white/50 hover:bg-white/5"
+                    aria-label="Close explanation"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              {explanation.error ? (
+                <div className="mt-2 text-red-300/90">{explanation.error}</div>
+              ) : explanation.loading ? (
+                <div className="mt-2 text-white/55">Leo is analyzing the code and syntax…</div>
+              ) : explanation.steps[explanation.index] ? (
+                <div className="mt-2 space-y-1.5 text-white/75">
+                  <div className="font-medium text-[#c9c4ff]">{explanation.steps[explanation.index].title}</div>
+                  <div><span className="text-white/45">What it does:</span> {explanation.steps[explanation.index].what}</div>
+                  <div><span className="text-white/45">Why we wrote it:</span> {explanation.steps[explanation.index].why}</div>
+                  {!!explanation.steps[explanation.index].syntax?.length && (
+                    <div><span className="text-white/45">Syntax/concepts:</span> {explanation.steps[explanation.index].syntax?.join(', ')}</div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
           <EditorArea
             tabs={openTabs}
             activeTab={activeTab}
@@ -1011,10 +1326,16 @@ function CodeSpaceShell({
             onContentChange={updateContent}
             onSave={() => void saveFile()}
             onRun={() => void runFile()}
+            onExplain={() => {
+              if (!activeFile || !activeContent.trim()) return
+              const language = activeFile.endsWith('.py') ? 'python' : activeFile.endsWith('.ts') || activeFile.endsWith('.tsx') ? 'typescript' : activeFile.endsWith('.js') || activeFile.endsWith('.jsx') ? 'javascript' : 'code'
+              void startExplanation({ path: activeFile, code: activeContent, language, goal: lastUserGoalRef.current || '' })
+            }}
             onTabClick={(path) => void openFile(path)}
             onTabClose={closeTab}
             onCursorChange={(line, col) => setCursor({ line, col })}
             running={runningPath === activeFile}
+            explainRange={activeExplainRange}
           />
 
           <Panel

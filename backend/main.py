@@ -1327,3 +1327,170 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)
+
+
+class ExplainCodeRequest(BaseModel):
+    path: str = ""
+    code: str = ""
+    language: str = ""
+    goal: str = ""
+
+
+def _fallback_explain_steps(code: str, path: str, goal: str) -> list[dict]:
+    """Deterministic, line-based explanation when the LLM is unavailable."""
+    lines = code.splitlines() or [""]
+    steps: list[dict] = []
+    i = 0
+    n = len(lines)
+    chunk = 0
+    while i < n and chunk < 80:
+        while i < n and not lines[i].strip():
+            i += 1
+        if i >= n:
+            break
+        start = i + 1
+        j = i
+        nonempty = 0
+        while j < n and nonempty < 6:
+            if not lines[j].strip():
+                if nonempty > 0:
+                    break
+                j += 1
+                continue
+            nonempty += 1
+            j += 1
+        end = j
+        block = "\n".join(lines[i:j]).strip()
+        low = block.lower()
+        title = "Code step"
+        what = "This part of the program runs as written."
+        syntax: list[str] = []
+        if "import " in low or low.startswith("from "):
+            title = "Imports"
+            what = "Loads modules or names so the code can use existing functionality."
+            syntax = ["import", "modules"]
+        elif "def " in block:
+            title = "Function definition"
+            what = "Defines a reusable block of code that can be called by name."
+            syntax = ["def", "parameters", "function body"]
+        elif "class " in block:
+            title = "Class definition"
+            what = "Defines a type/object blueprint with its data and behavior."
+            syntax = ["class", "methods"]
+        elif "if " in block or "elif " in block or "else" in block:
+            title = "Conditional logic"
+            what = "Chooses what to do based on whether a condition is true."
+            syntax = ["if/elif/else", "conditions"]
+        elif "for " in block or "while " in block:
+            title = "Loop"
+            what = "Repeats actions for each item or while a condition holds."
+            syntax = ["loops", "iteration"]
+        elif "try" in block or "except" in block:
+            title = "Error handling"
+            what = "Handles failures safely instead of crashing unexpectedly."
+            syntax = ["try/except"]
+        elif "input(" in block:
+            title = "User input"
+            what = "Reads input. Note: Leo's sandbox runs scripts non-interactively, so use arguments/defaults for runnable demos."
+            syntax = ["input()", "variables"]
+        elif "print(" in block or "console.log" in block:
+            title = "Output"
+            what = "Displays a result to the user or terminal."
+            syntax = ["print()/console.log", "output"]
+        elif "return " in block:
+            title = "Return value"
+            what = "Sends a result back from a function."
+            syntax = ["return"]
+        elif "=" in block and "==" not in block:
+            title = "Assignment / setup"
+            what = "Stores a value in a name so it can be used later."
+            syntax = ["variables", "assignment"]
+        why = f"It supports the requested goal: {goal}." if goal else f"It helps implement the behavior in {path or 'this file'}."
+        steps.append({"startLine": start, "endLine": end, "title": title, "what": what, "why": why, "syntax": syntax, "code": block[:1200]})
+        i = j
+        chunk += 1
+    if not steps:
+        steps.append({"startLine": 1, "endLine": max(1, n), "title": "File overview", "what": "This file contains the generated code.", "why": f"It was created for: {goal}." if goal else "It implements the requested behavior.", "syntax": [], "code": code[:1200]})
+    return steps
+
+
+def _parse_explain_json(text: str, code: str, path: str, goal: str) -> list[dict]:
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        data = json.loads(raw)
+    except Exception:
+        for a, b in (("{", "}"), ("[", "]")):
+            s = raw.find(a)
+            e = raw.rfind(b)
+            if s != -1 and e != -1 and e > s:
+                try:
+                    data = json.loads(raw[s : e + 1])
+                    break
+                except Exception:
+                    pass
+        else:
+            return _fallback_explain_steps(code, path, goal)
+    steps = data.get("steps") if isinstance(data, dict) else data
+    if not isinstance(steps, list) or not steps:
+        return _fallback_explain_steps(code, path, goal)
+    n = max(1, len(code.splitlines()))
+    out: list[dict] = []
+    for s in steps[:120]:
+        if not isinstance(s, dict):
+            continue
+        try:
+            start = max(1, min(n, int(s.get("startLine", 1))))
+            end = max(start, min(n, int(s.get("endLine", start))))
+        except Exception:
+            continue
+        out.append({
+            "startLine": start, "endLine": end,
+            "title": str(s.get("title") or "Code step")[:120],
+            "what": str(s.get("what") or "")[:1200],
+            "why": str(s.get("why") or "")[:1200],
+            "syntax": [str(x)[:80] for x in (s.get("syntax") or []) if x][:12] if isinstance(s.get("syntax"), list) else [],
+            "code": "\n".join(code.splitlines()[start - 1 : end])[:1200],
+        })
+    return out or _fallback_explain_steps(code, path, goal)
+
+
+@app.post("/api/explain-code")
+async def explain_code(request: Request, payload: ExplainCodeRequest):
+    """Return a structured, line-by-line walkthrough of workspace code."""
+    workspace, _ = await _workspace_context(request.state.session)
+    code = payload.code
+    path = (payload.path or "").strip()
+    if not code and path:
+        try:
+            code = workspace_executor.read(workspace, path)
+        except SandboxExecutionError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not code.strip():
+        raise HTTPException(status_code=400, detail="No code to explain")
+    goal = (payload.goal or "").strip()
+    language = (payload.language or "").strip() or ("python" if path.endswith(".py") else "code")
+    lines = code.splitlines()
+    if len(lines) > 500:
+        code = "\n".join(lines[:500]) + "\n# ... (truncated for explanation)"
+    prompt = (
+        "You are Leo, a coding tutor. Explain the user's code for learning. "
+        "Return ONLY valid JSON (no markdown) with this shape: "
+        "{\"steps\":[{\"startLine\":1,\"endLine\":2,\"title\":\"...\",\"what\":\"What it does\","
+        "\"why\":\"Why it was written for the goal\",\"syntax\":[\"concept\"]}]}. "
+        "Cover the entire file in logical chunks (usually 1-8 lines each). Be accurate, beginner-friendly, "
+        "and mention syntax/concepts being used. "
+        f"Path: {path or 'untitled'}. Language: {language}. Goal: {goal or 'implement the user request'}.\n\nCODE:\n" + code
+    )
+    try:
+        if not os.getenv("GEMINI_API_KEY"):
+            raise RuntimeError("no gemini key")
+        response = await asyncio.to_thread(client.models.generate_content, model=GEMINI_MODEL, contents=prompt)
+        text = getattr(response, "text", None) or ""
+        steps = _parse_explain_json(text, code, path, goal)
+    except Exception:
+        steps = _fallback_explain_steps(code, path, goal)
+    return {"path": path, "language": language, "steps": steps}
