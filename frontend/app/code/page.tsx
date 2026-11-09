@@ -158,6 +158,8 @@ function CodeSpaceShell({
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectRef = useRef<() => void>(() => {})
   const lastParsedTranscriptRef = useRef('')
+  const wsFallbackIndexRef = useRef(0)
+  const wsTriedFallbackRef = useRef(false)
 
   const pushMessage = useCallback((role: 'user' | 'leo', text: string) => {
     if (!text) return
@@ -254,6 +256,10 @@ function CodeSpaceShell({
   // ---- WebSocket connection ----
   const connect = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN) return
+    const fallbackUrls = [
+      'https://leo-voice-agent.onrender.com',
+      'https://leo-voice-agent.onrender.com',
+    ]
     const resolveBackendUrl = () => {
       const fromEnv = (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim()
       if (fromEnv) return fromEnv.replace(/\/+$/, '').replace(/\/api$/, '')
@@ -261,14 +267,18 @@ function CodeSpaceShell({
         const host = window.location.hostname
         if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000'
       }
-      return 'https://leo-voice-agent.onrender.com'
+      return fallbackUrls[wsFallbackIndexRef.current] || fallbackUrls[0]
     }
     const backendUrl = resolveBackendUrl()
     const wsUrl = `${backendUrl.replace(/^http/i, 'ws')}/ws/process-voice`
     const ws = new WebSocket(wsUrl)
     socketRef.current = ws
 
-    ws.onopen = () => setVoiceStatus('ready')
+    ws.onopen = () => {
+      wsFallbackIndexRef.current = 0
+      wsTriedFallbackRef.current = false
+      setVoiceStatus('ready')
+    }
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
@@ -408,6 +418,19 @@ function CodeSpaceShell({
     }
 
     ws.onclose = () => {
+      // Try a fallback backend once if the primary failed to connect.
+      if (!wsTriedFallbackRef.current && wsFallbackIndexRef.current === 0) {
+        wsTriedFallbackRef.current = true
+        wsFallbackIndexRef.current = 1
+        try {
+          socketRef.current = null
+        } catch {}
+        if (!unmountingRef.current) {
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+          reconnectTimerRef.current = setTimeout(() => connectRef.current(), 500)
+          return
+        }
+      }
       setVoiceStatus('idle')
       // Reconnect on our own so a backend restart does not end the session.
       if (!unmountingRef.current) {
@@ -417,6 +440,18 @@ function CodeSpaceShell({
     }
 
     ws.onerror = () => {
+      if (!wsTriedFallbackRef.current && wsFallbackIndexRef.current === 0) {
+        wsTriedFallbackRef.current = true
+        wsFallbackIndexRef.current = 1
+        try {
+          socketRef.current = null
+        } catch {}
+        if (!unmountingRef.current) {
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+          reconnectTimerRef.current = setTimeout(() => connectRef.current(), 500)
+          return
+        }
+      }
       setVoiceStatus('disconnected')
     }
     // State setters are stable, so this effect connects once instead of
