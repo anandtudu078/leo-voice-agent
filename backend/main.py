@@ -313,12 +313,17 @@ async def echo(msg: str = Body(default="hello")):
 # Initialize Google Gemini using the new google-genai SDK
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# gemini-2.5-flash is closed to new API keys and gemini-3.8-flash is often
+# rate-limited upstream, so default to a model available to current keys.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 SYSTEM_INSTRUCTION = (
-    "You are Leo, a voice coding assistant inside a browser IDE. Keep answers "
-    "short and spoken-friendly (at most three sentences) unless the user asks "
-    "for code, in which case reply with the code and one line of context."
+    "You are Leo, a voice coding assistant inside a browser IDE. You are having "
+    "a spoken conversation: keep answers short and natural (at most three "
+    "sentences) unless the user asks for code, in which case reply with the code "
+    "and one line of context. Remember the earlier turns of the conversation and "
+    "use them for follow-ups. Use the workspace file list when it helps, and "
+    "never claim to have run or saved something you did not do."
 )
 
 GNANI_API_KEY = os.getenv("GNANI_API_KEY")
@@ -403,34 +408,64 @@ def _decode_audio(payload: str) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-async def _generate_reply(transcript: str) -> str:
-    """Run Evon planning, fall back to Gemini, and return Leo's spoken text."""
+def _workspace_summary(workspace: Path) -> str:
+    """One-line description of the workspace, used to ground the conversation."""
+    files = [
+        entry["path"] for entry in _workspace_files(workspace) if entry["kind"] == "file"
+    ]
+    if not files:
+        return "The user's workspace is currently empty."
+    shown = ", ".join(files[:30])
+    more = f" and {len(files) - 30} more" if len(files) > 30 else ""
+    return f"Files in the user's workspace: {shown}{more}."
+
+
+async def _generate_reply(
+    transcript: str,
+    history: list[dict] | None = None,
+    workspace: Path | None = None,
+) -> str:
+    """Return Leo's spoken reply, with the earlier turns as context."""
     tools = [
         {"name": "read_file", "description": "Read a file"},
         {"name": "write_file", "description": "Write a file"},
         {"name": "run_script", "description": "Run a script"},
     ]
+
+    system = SYSTEM_INSTRUCTION
+    if workspace is not None:
+        system = f"{system}\n\n{_workspace_summary(workspace)}"
+
+    # The orchestrator is optional: when it recognises a tool intent we only
+    # mention it to the model, so the reply stays conversational instead of
+    # claiming work that has not happened.
     try:
         plan = await asyncio.to_thread(plan_from_transcript, transcript, tools)
-        # Evon fired a real tool call: report intent, leave the actual execution to the
-        # caller (HTTP returns code + logs, WebSocket routes it through the sandbox).
         if plan.get("action") in {"read", "write", "run"} and plan.get("tool"):
-            return (
-                f"Planned: {plan['action']} with {plan['tool']}. "
-                "I'll run it now. "
-                f"Reason: {plan.get('reason', '')}"
+            system += (
+                f"\n\nThe user is probably asking to {plan['action']} a file "
+                f"with {plan['tool']}. Ask a short clarifying question if you "
+                "need the file name or the change."
             )
     except Exception:  # noqa: BLE001
-        # Evon is optional; fall through to plain Gemini.
         pass
+
+    contents = [
+        {"role": turn["role"], "parts": [{"text": turn["text"]}]}
+        for turn in list(history or [])[-12:]
+        if turn.get("text")
+    ]
+    contents.append({"role": "user", "parts": [{"text": transcript}]})
 
     try:
         response = await asyncio.to_thread(
             client.models.generate_content,
             model=GEMINI_MODEL,
-            contents=f"{SYSTEM_INSTRUCTION}\n\nUser: {transcript}",
+            contents=contents,
+            config={"system_instruction": system},
         )
-        return response.text or "I understood that, but I have nothing to do right now."
+        reply = (response.text or "").strip()
+        return reply or "I heard you, but I'm not sure what to say yet."
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Gemini LLM Error: {exc}") from exc
 
@@ -480,15 +515,25 @@ async def websocket_process_voice(websocket: WebSocket):
         }
     )
 
+    # Earlier turns of this conversation, so follow-ups have context.
+    history: list[dict] = []
+
     async def run_turn(transcript: str) -> None:
         await websocket.send_json({"type": "turn-started"})
         await websocket.send_json({"type": "waiting", "message": "Thinking..."})
         try:
-            reply = await _generate_reply(transcript)
-            audio = await _speak(reply)
+            reply = await _generate_reply(
+                transcript, history=history, workspace=workspace
+            )
         except HTTPException as exc:
             await websocket.send_json({"type": "error", "error": str(exc.detail)})
             return
+        try:
+            audio = await _speak(reply)
+        except HTTPException as exc:
+            # Keep the conversation moving: show the reply even when TTS fails.
+            await websocket.send_json({"type": "error", "error": str(exc.detail)})
+            audio = b""
         await websocket.send_json(
             {
                 "type": "speech",
@@ -496,6 +541,13 @@ async def websocket_process_voice(websocket: WebSocket):
                 "text": reply,
             }
         )
+        history.extend(
+            [
+                {"role": "user", "text": transcript},
+                {"role": "model", "text": reply},
+            ]
+        )
+        del history[:-12]
         if workspace_id is not None:
             await asyncio.to_thread(
                 repository.record_voice_turn, workspace_id, transcript, reply

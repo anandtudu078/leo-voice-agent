@@ -296,25 +296,38 @@ function CodeSpaceShell({
             setVoiceStatus('ready')
             break
           case 'speech':
+            setLogs((prev) => [...prev, `{ Agent says: ${msg.text || '<reply>'} }`])
+            setVoiceStatus('ready')
+            setAgentStatus('done')
             try {
               const base64 = msg.speech || ''
               if (base64) {
                 const binary = atob(base64)
                 const bytes = new Uint8Array(binary.length)
                 for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+                // Gnani returns WAV; keep the blob URL alive until playback ends.
                 const blob = new Blob([bytes], { type: 'audio/wav' })
                 const url = URL.createObjectURL(blob)
                 const audio = new Audio(url)
-                audio.play().catch(() => {})
-                URL.revokeObjectURL(url)
+                setTtsStatus('speaking')
+                audio.onended = () => {
+                  URL.revokeObjectURL(url)
+                  setTtsStatus('idle')
+                }
+                audio.onerror = () => {
+                  URL.revokeObjectURL(url)
+                  setTtsStatus('error')
+                }
+                audio.play().catch(() => {
+                  URL.revokeObjectURL(url)
+                  setTtsStatus('error')
+                })
+              } else {
+                setTtsStatus('idle')
               }
-              setLogs((prev) => [...prev, `{ Agent says: ${msg.text || '<reply>'} }`])
             } catch {
-              // ignore audio decode errors
+              setTtsStatus('error')
             }
-            setVoiceStatus('ready')
-            setAgentStatus('done')
-            setTtsStatus('idle')
             break
           case 'error': {
             const message = String(msg.error || '')
@@ -323,8 +336,10 @@ function CodeSpaceShell({
             // disconnection when the connection is actually gone.
             const connected = ws.readyState === WebSocket.OPEN
             setVoiceStatus(connected ? 'ready' : 'disconnected')
-            if (/transcri|audio|speech|stt|gnani|no speech/i.test(message)) {
+            if (/transcri|\bstt\b|no speech|audio format/i.test(message)) {
               setSttStatus('error')
+            } else if (/\btts\b|synth|voice/i.test(message)) {
+              setTtsStatus('error')
             } else if (connected) {
               setAgentStatus('error')
             }
