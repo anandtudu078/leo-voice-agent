@@ -626,7 +626,21 @@ async def _generate_reply(
         reply = (response.text or "").strip()
         return reply or "I heard you, but I'm not sure what to say yet."
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Gemini LLM Error: {exc}") from exc
+        tl = (transcript or "").lower()
+        import re as _re
+
+        if _re.search(r"\b(run|execute|start)\b", tl):
+            m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", transcript or "")
+            if m:
+                return f"I'll run {m.group(1)} now."
+            return "I'll run that script now."
+        if _re.search(r"\b(read|open|show|view)\b", tl):
+            m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", transcript or "")
+            if m:
+                return f"I'll open {m.group(1)} for you."
+        if _re.search(r"\b(create|make|write|add)\b.*\b(file|script|code)\b", tl):
+            return "I'll create that file with the requested code."
+        return f"I heard you. (LLM unavailable: {exc})"
 
 
 async def _speak(text: str) -> bytes:
@@ -686,7 +700,24 @@ async def websocket_process_voice(websocket: WebSocket):
                 transcript, history=history, workspace=workspace
             )
         except HTTPException as exc:
+            tl = (transcript or "").lower()
+            if _re.search(r"\b(run|execute|start)\b", tl):
+                m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", transcript or "")
+                if m:
+                    try:
+                        output = await asyncio.to_thread(workspace_executor.run, workspace, m.group(1))
+                        await websocket.send_json({"type": "logs", "logs": [output.strip() or f"> {m.group(1)} finished with no output"], "run": {"path": m.group(1), "ok": True, "output": output}})
+                        await websocket.send_json({"type": "listening", "message": "I'm listening now."})
+                        return
+                    except SandboxExecutionError as sexc:
+                        await websocket.send_json({"type": "logs", "logs": [str(sexc)], "run": {"path": m.group(1), "ok": False, "output": str(sexc)}})
+                        await websocket.send_json({"type": "listening", "message": "I'm listening now."})
+                        return
+                await websocket.send_json({"type": "logs", "logs": ["Which file should I run?"]})
+                await websocket.send_json({"type": "listening", "message": "I'm listening now."})
+                return
             await websocket.send_json({"type": "error", "error": str(exc.detail)})
+            await websocket.send_json({"type": "listening", "message": "I'm listening now."})
             return
 
         # If the user asked to write/create/update code and the agent replied with a

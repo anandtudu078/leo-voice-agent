@@ -110,6 +110,7 @@ class SandboxExecutor:
             result = subprocess.run(
                 [executable, str(resolved)] + args,
                 cwd=workspace,
+                input="",
                 capture_output=True,
                 text=True,
                 timeout=30,
