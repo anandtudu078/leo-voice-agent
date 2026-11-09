@@ -9,6 +9,7 @@ import { Panel } from './Panel'
 import { StatusBar } from './StatusBar'
 import { VoiceStatus } from './VoiceStatus'
 import { languageLabel } from '@/lib/highlight'
+import { WavRecorder } from '@/lib/audio'
 import {
   baseName,
   listWorkspace,
@@ -143,6 +144,14 @@ function CodeSpaceShell({
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
 
+  const blobToDataUrl = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+      reader.onerror = () => reject(reader.error ?? new Error('Could not read the recording'))
+      reader.readAsDataURL(blob)
+    })
+
   const activeTab = activeFile
   const activeContent = tabs.find((tab) => tab.path === activeFile)?.content ?? ''
   const openTabs = tabs.map((tab) => ({
@@ -155,8 +164,7 @@ function CodeSpaceShell({
     .map((tab) => tab.path)
 
   const socketRef = useRef<WebSocket | null>(null)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const recorderRef = useRef<WavRecorder | null>(null)
 
   // ---- Voice status badge config ----
   const statusBadge = useMemo(() => {
@@ -189,10 +197,11 @@ function CodeSpaceShell({
     try {
       setFiles(await listWorkspace())
       setOffline(false)
-    } catch {
+    } catch (err) {
       setOffline(true)
+      pushLog(`ERROR: could not load the workspace — ${describeError(err)}`)
     }
-  }, [])
+  }, [pushLog])
 
   useEffect(() => {
     let cancelled = false
@@ -202,8 +211,10 @@ function CodeSpaceShell({
         setFiles(entries)
         setOffline(false)
       })
-      .catch(() => {
-        if (!cancelled) setOffline(true)
+      .catch((err) => {
+        if (cancelled) return
+        setOffline(true)
+        pushLog(`ERROR: could not load the workspace — ${describeError(err)}`)
       })
       .finally(() => {
         if (!cancelled) setLoadingTree(false)
@@ -211,7 +222,7 @@ function CodeSpaceShell({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [pushLog])
 
   // ---- WebSocket connection ----
   const connect = useCallback(() => {
@@ -305,10 +316,20 @@ function CodeSpaceShell({
             setAgentStatus('done')
             setTtsStatus('idle')
             break
-          case 'error':
-            setLogs((prev) => [...prev, `ERROR: ${msg.error || ''}`])
-            setVoiceStatus('disconnected')
+          case 'error': {
+            const message = String(msg.error || '')
+            setLogs((prev) => [...prev, `ERROR: ${message}`])
+            // A failed turn does not close the socket, so only report a
+            // disconnection when the connection is actually gone.
+            const connected = ws.readyState === WebSocket.OPEN
+            setVoiceStatus(connected ? 'ready' : 'disconnected')
+            if (/transcri|audio|speech|stt|gnani|no speech/i.test(message)) {
+              setSttStatus('error')
+            } else if (connected) {
+              setAgentStatus('error')
+            }
             break
+          }
         }
       } catch {
         // ignore malformed messages
@@ -330,8 +351,8 @@ function CodeSpaceShell({
     connect()
     return () => {
       socketRef.current?.close()
-      recorderRef.current?.stop()
-      streamRef.current?.getTracks().forEach((track) => track.stop())
+      void recorderRef.current?.stop()
+      recorderRef.current = null
     }
   }, [connect])
   // ---- File operations (HTTP workspace API) ----
@@ -501,6 +522,8 @@ function CodeSpaceShell({
   }, [activeFile, tabs, panelOpen, paletteOpen])
 
   // ---- Voice recording ----
+  // The STT API accepts wav/ogg/mp3/m4a/flac/aac but not the WebM/Opus that
+  // MediaRecorder produces in Chrome, so capture PCM and send a WAV blob.
   const startRecording = async () => {
     if (recording || !navigator.mediaDevices?.getUserMedia) return
     setLoading(true)
@@ -508,61 +531,56 @@ function CodeSpaceShell({
     setVoiceStatus('listening')
     setSttStatus('listening')
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
-      const chunks: BlobPart[] = []
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data)
-      }
-
-      mediaRecorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop())
-        streamRef.current = null
-        recorderRef.current = null
-        setRecording(false)
-        setLoading(false)
-
-        if (chunks.length === 0) return
-        const blob = new Blob(chunks, { type: 'audio/webm' })
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          const base64 = typeof reader.result === 'string' ? reader.result : ''
-          if (base64 && socketRef.current?.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({ type: 'audio', data: base64 }))
-          } else {
-            setLogs((prev) => [...prev, 'ERROR: voice socket is not connected'])
-            setVoiceStatus('disconnected')
-          }
-        }
-        reader.readAsDataURL(blob)
-      }
-
-      recorderRef.current = mediaRecorder
-      streamRef.current = stream
-      mediaRecorder.start()
+      recorderRef.current = await WavRecorder.start()
       setRecording(true)
     } catch (err) {
-      console.error('Microphone access denied:', err)
+      console.error('Microphone unavailable:', err)
+      setLogs((prev) => [...prev, `ERROR: ${describeError(err)}`])
+      setVoiceStatus(socketRef.current?.readyState === WebSocket.OPEN ? 'ready' : 'disconnected')
+      setSttStatus('error')
+    } finally {
       setLoading(false)
-      setRecording(false)
-      setLogs((prev) => [...prev, 'ERROR: microphone access denied'])
-      setVoiceStatus('disconnected')
     }
   }
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     const recorder = recorderRef.current
-    if (recorder && recorder.state !== 'inactive') {
-      recorder.stop()
-    } else {
-      setRecording(false)
+    recorderRef.current = null
+    setRecording(false)
+    if (!recorder) {
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    try {
+      const blob = await recorder.stop()
+      if (blob.size === 0) {
+        setLogs((prev) => [...prev, 'ERROR: no audio captured — try speaking again'])
+        setVoiceStatus('ready')
+        setSttStatus('error')
+        return
+      }
+      const base64 = await blobToDataUrl(blob)
+      if (base64 && socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: 'audio', data: base64 }))
+        setVoiceStatus('processing')
+        setSttStatus('listening')
+      } else {
+        setLogs((prev) => [...prev, 'ERROR: voice socket is not connected'])
+        setVoiceStatus('disconnected')
+      }
+    } catch (err) {
+      setLogs((prev) => [...prev, `ERROR: ${describeError(err)}`])
+      setVoiceStatus('disconnected')
+      setSttStatus('error')
+    } finally {
       setLoading(false)
     }
   }
 
   const toggleRecording = () => {
-    if (recording) stopRecording()
+    if (recording) void stopRecording()
     else void startRecording()
   }
 
