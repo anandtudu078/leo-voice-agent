@@ -646,33 +646,32 @@ async def _speak(text: str) -> bytes:
 
 @app.websocket("/ws/process-voice")
 async def websocket_process_voice(websocket: WebSocket):
-    """Voice IDE socket: audio/text in, transcript + spoken reply + files out.
-
-    Client -> Server (JSON):
-        {"type": "audio", "data": "base64 or data: URL"}
-        {"type": "text", "text": "voice command"}
-        {"type": "read_file", "path": "main.py"}
-        {"type": "create_file" | "write_file", "path": "main.py", "code": "..."}
-        {"type": "delete_file", "path": "main.py"}
-        {"type": "run_script", "path": "main.py"}
-    Server -> Client (JSON):
-        {"type": "ready", "files": [...]}
-        {"type": "transcript", "transcript": "..."}
-        {"type": "turn-started"} | {"type": "waiting"} | {"type": "listening"}
-        {"type": "speech", "speech": "base64 audio", "text": "spoken reply"}
-        {"type": "file", "path": "...", "content": "..."}
-        {"type": "logs", "logs": [...]}
-        {"type": "error", "error": "..."}
-    """
-    await websocket.accept()
-    workspace, workspace_id = await _workspace_context(_websocket_session(websocket))
-    await websocket.send_json(
-        {
-            "type": "ready",
-            "message": "Leo is listening. Speak or send a command.",
-            "files": _workspace_files(workspace),
-        }
-    )
+    """Voice IDE socket: audio/text in, transcript + spoken reply + files out."""
+    try:
+        await websocket.accept()
+    except Exception:
+        return
+    try:
+        workspace, workspace_id = await _workspace_context(_websocket_session(websocket))
+        await websocket.send_json(
+            {
+                "type": "ready",
+                "message": "Leo is listening. Speak or send a command.",
+                "files": _workspace_files(workspace),
+            }
+        )
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        try:
+            await websocket.send_json({"type": "error", "error": str(exc)})
+        except Exception:
+            pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+        return
 
     # Earlier turns of this conversation, so follow-ups have context.
     history: list[dict] = []
@@ -923,10 +922,15 @@ async def websocket_process_voice(websocket: WebSocket):
                 )
     except WebSocketDisconnect:
         pass
+    except Exception:
+        # Avoid unhandled exceptions tearing down the connection.
+        pass
     finally:
         try:
             await websocket.close()
-        except RuntimeError:
+        except (RuntimeError, WebSocketDisconnect):
+            pass
+        except Exception:
             pass
 
 
