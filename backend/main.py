@@ -678,6 +678,8 @@ async def websocket_process_voice(websocket: WebSocket):
     history: list[dict] = []
 
     async def run_turn(transcript: str) -> None:
+        import re as _re
+
         await websocket.send_json({"type": "turn-started"})
         await websocket.send_json({"type": "waiting", "message": "Thinking..."})
         try:
@@ -687,6 +689,46 @@ async def websocket_process_voice(websocket: WebSocket):
         except HTTPException as exc:
             await websocket.send_json({"type": "error", "error": str(exc.detail)})
             return
+
+        # If the user asked to write/create/update code and the agent replied with a
+        # fenced code block, persist it to the target file (coding-agent behavior) and
+        # notify the client so the editor/codespace shows the code.
+        try:
+            tl = (transcript or "").lower()
+            wants_code = bool(
+                _re.search(
+                    r"\b(write|add|implement|create|update|modify|change|put|insert|include|generate|build|make|define|code|function|class|script|program)\b",
+                    tl,
+                )
+            )
+            file_m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", transcript or "")
+            if not file_m:
+                file_m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", reply or "")
+            code_m = _re.search(r"```(?:[a-zA-Z0-9_+-]+)?\s*\n(.*?)```", reply or "", flags=_re.DOTALL)
+            if wants_code and file_m and code_m:
+                target_path = file_m.group(1).strip().strip('"').strip("'").strip("`")
+                code_text = (code_m.group(1) or "").rstrip() + "\n"
+                if target_path and code_text.strip():
+                    saved = workspace_executor.write(workspace, target_path, code_text)
+                    if workspace_id is not None:
+                        try:
+                            await asyncio.to_thread(
+                                repository.save_file_snapshot, workspace_id, target_path, code_text
+                            )
+                        except Exception:
+                            pass
+                    await websocket.send_json({"type": "file", "path": target_path, "content": code_text})
+                    await websocket.send_json(
+                        {
+                            "type": "logs",
+                            "logs": [f"> Saved {target_path} ({saved})"],
+                            "files": _workspace_files(workspace),
+                        }
+                    )
+        except Exception:
+            # Never fail the conversational turn because of auto-save.
+            pass
+
         try:
             audio = await _speak(reply)
         except HTTPException as exc:
