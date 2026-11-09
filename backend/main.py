@@ -200,7 +200,7 @@ async def db_health():
 @app.post("/api/parse-voice-command")
 async def parse_voice_command(request: Request):
     """Extract intent from a voice transcript.
-    Returns JSON: {"action": "createFile"|"createFolder"|"editFile"|"runFile"|"none", "payload": {...}}."""
+    Returns JSON: {"action": "createFile"|"writeFile"|"createFolder"|"editFile"|"runFile"|"none", "payload": {...}}."""
     import re
 
     body = await request.json()
@@ -210,9 +210,7 @@ async def parse_voice_command(request: Request):
 
     def _clean_path(raw: str) -> str:
         p = (raw or "").strip().strip('"').strip("'").strip("`")
-        # strip trailing punctuation from speech artifacts
         p = re.sub(r"[.,!?;:]+$", "", p).strip()
-        # common spoken forms: "dot py" -> ".py"
         p = re.sub(r"\s+dot\s+([a-zA-Z0-9]+)\b", r".\1", p, flags=re.IGNORECASE)
         p = re.sub(r"\s+", " ", p)
         return p
@@ -221,36 +219,82 @@ async def parse_voice_command(request: Request):
         m = re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", text)
         return _clean_path(m.group(1)) if m else None
 
+    def _strip_code_fences(text: str) -> str:
+        t = (text or "").strip()
+        m = re.search(r"```(?:[a-zA-Z0-9_+-]+)?\s*\n(.*?)```", t, flags=re.DOTALL)
+        if m:
+            return m.group(1).strip() + "\n"
+        if t.startswith("```") and t.endswith("```"):
+            return re.sub(r"^```[^\n]*\n?|```$", "", t).strip() + "\n"
+        return t
+
+    async def _generate_code(path: str, instruction: str) -> str:
+        prompt = (
+            "You are writing code for a file in an IDE. Return ONLY the complete, runnable "
+            f"file contents for {path}. No markdown fences, no explanation.\n\n"
+            f"User request: {instruction}\n"
+        )
+        try:
+            resp = await asyncio.to_thread(
+                client.models.generate_content,
+                model=GEMINI_MODEL,
+                contents=[{"role": "user", "parts": [{"text": prompt}]}],
+            )
+            return _strip_code_fences((getattr(resp, "text", None) or "").strip())
+        except Exception:
+            return ""
+
     try:
-        # Try the LLM planner first (best effort).
         try:
             plan = await asyncio.to_thread(plan_from_transcript, transcript, [])
         except Exception:
             plan = {}
 
-        if plan.get("action") == "read" and plan.get("tool") == "read_file" and plan.get("path"):
-            return JSONResponse({"action": "editFile", "payload": {"path": _clean_path(plan["path"])}}, status_code=200)
+        tl = transcript.lower()
+        path = _extract_filename(transcript)
+        wants_code = bool(
+            re.search(
+                r"\b(write|add|implement|create\s+(?:a\s+)?(?:function|class|method|code|script|program)|"
+                r"put|insert|include|generate|build|make\s+(?:a\s+)?(?:function|class)|define|code\s+for|"
+                r"with\s+(?:a\s+)?(?:function|class|code|this)|to\s+add|that\s+(?:adds|returns|prints|checks))\b",
+                tl,
+            )
+        ) or ("```" in transcript)
+        is_open_only = bool(re.search(r"^\s*(?:please\s+)?(?:open|show|read|view)\b", tl)) and not wants_code
+
         if plan.get("action") == "write" and plan.get("tool") == "write_file" and plan.get("path"):
+            p = _clean_path(plan["path"])
+            code = plan.get("code") or ""
+            if not code and wants_code:
+                code = await _generate_code(p, transcript)
             return JSONResponse(
-                {"action": "createFile", "payload": {"path": _clean_path(plan["path"]), "code": plan.get("code") or ""}},
+                {"action": "writeFile" if code else "createFile", "payload": {"path": p, "code": code}},
                 status_code=200,
             )
+        if plan.get("action") == "read" and plan.get("tool") == "read_file" and plan.get("path") and not wants_code:
+            return JSONResponse({"action": "editFile", "payload": {"path": _clean_path(plan["path"])}}, status_code=200)
         if plan.get("action") == "run" and plan.get("tool") == "run_script" and plan.get("path"):
             return JSONResponse({"action": "runFile", "payload": {"path": _clean_path(plan["path"])}}, status_code=200)
 
-        # Deterministic keyword fallback (robust to phrasing).
-        tl = transcript.lower()
+        # Coding write intent targeting a file: generate/insert code (must come before plain open).
+        if path and wants_code and not re.search(r"\b(create|make|new)\b.*\b(folder|directory)\b", tl):
+            code = await _generate_code(path, transcript)
+            if code:
+                return JSONResponse({"action": "writeFile", "payload": {"path": path, "code": code}}, status_code=200)
+            # Don't overwrite an existing file with empty generated content.
+            return JSONResponse({"action": "editFile", "payload": {"path": path}}, status_code=200)
 
-                # Edit/open file (check before generic create/run where phrasing overlaps).
-        if re.search(r"\b(edit|modify|change|open|update|show)\b", tl):
-            path = _extract_filename(transcript)
+        # Edit/open file (read-only intent).
+        if re.search(r"\b(edit|modify|change|open|update|show|read|view)\b", tl) and not wants_code:
             if not path:
-                m = re.search(r"\b(?:edit|modify|change|open|update|show)\s+(?:a\s+|the\s+)?(?:file\s+)?(.+)$", tl)
+                m = re.search(r"\b(?:edit|modify|change|open|update|show|read|view)\s+(?:a\s+|the\s+)?(?:file\s+)?(.+)$", tl)
                 path = _clean_path(m.group(1)) if m else None
             if path and not re.search(r"\b(create|make|new)\b.*\b(file|folder|directory)\b", tl):
                 return JSONResponse({"action": "editFile", "payload": {"path": path}}, status_code=200)
+        if is_open_only and path:
+            return JSONResponse({"action": "editFile", "payload": {"path": path}}, status_code=200)
 
-# Create folder.
+        # Create folder.
         if re.search(r"\b(create|make|new)\b.*\b(folder|directory)\b", tl):
             m = re.search(r"\b(?:folder|directory)\s+(?:named\s+|called\s+)?(.+)$", tl)
             if not m:
@@ -258,22 +302,31 @@ async def parse_voice_command(request: Request):
             path = _clean_path(m.group(1)) if m else "new-folder"
             return JSONResponse({"action": "createFolder", "payload": {"path": path}}, status_code=200)
 
-        # Create file.
+        # Create file (optionally with generated code).
         if re.search(r"\b(create|make|new)\b.*\bfile\b", tl):
-            path = _extract_filename(transcript)
             if not path:
                 m = re.search(r"\bfile\s+(?:named\s+|called\s+)?(.+)$", tl)
                 path = _clean_path(m.group(1)) if m else "untitled.py"
-            return JSONResponse({"action": "createFile", "payload": {"path": path, "code": ""}}, status_code=200)
+            code = await _generate_code(path, transcript) if wants_code else ""
+            return JSONResponse(
+                {"action": "writeFile" if code else "createFile", "payload": {"path": path, "code": code}},
+                status_code=200,
+            )
 
         # Run/execute.
         if re.search(r"\b(run|execute|start)\b", tl):
-            path = _extract_filename(transcript)
             if not path:
                 m = re.search(r"\b(?:run|execute|start)\s+(?:the\s+|file\s+|script\s+)?(.+)$", tl)
                 path = _clean_path(m.group(1)) if m else None
             if path:
                 return JSONResponse({"action": "runFile", "payload": {"path": path}}, status_code=200)
+
+        # Last resort: coding request that names a file.
+        if path and wants_code:
+            code = await _generate_code(path, transcript)
+            if code:
+                return JSONResponse({"action": "writeFile", "payload": {"path": path, "code": code}}, status_code=200)
+            return JSONResponse({"action": "editFile", "payload": {"path": path}}, status_code=200)
 
         return JSONResponse({"action": "none", "payload": None}, status_code=200)
     except Exception as e:

@@ -147,7 +147,7 @@ function CodeSpaceShell({
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
   const [messages, setMessages] = useState<{ id: number; role: 'user' | 'leo'; text: string }[]>([])
   const [creationMode, setCreationMode] = useState<'none' | 'ask' | 'path'>('none')
-  const [autoCommand, setAutoCommand] = useState<'createFile' | 'createFolder' | 'editFile' | 'runFile' | null>(null)
+  const [autoCommand, setAutoCommand] = useState<'createFile' | 'writeFile' | 'createFolder' | 'editFile' | 'runFile' | null>(null)
   const [autoCommandPayload, setAutoCommandPayload] = useState<{path?: string, code?: string} | null>(null)
   const [folderSelectMode, setFolderSelectMode] = useState<'none' | 'ask' | 'chosen'>('none')
   const [commandInput, setCommandInput] = useState('')
@@ -328,11 +328,28 @@ function CodeSpaceShell({
             setVoiceStatus('ready')
             setAgentStatus('done')
             break
-          case 'logs':
-            setLogs((prev) => [...prev, ...(msg.logs || [])])
+          case 'logs': {
+            const lines: string[] = Array.isArray(msg.logs) ? msg.logs : []
+            setLogs((prev) => [...prev, ...lines])
             if (Array.isArray(msg.files)) setFiles(msg.files)
+            // Safety net: when the backend saves a file (including from agent/tool flows),
+            // re-read it so the editor/codespace stays in sync with disk.
+            try {
+              const wsOpen = ws?.readyState === WebSocket.OPEN
+              if (wsOpen) {
+                for (const line of lines) {
+                  const m = typeof line === 'string' ? line.match(/^>\s*Saved\s+(.+?)\s+\(/) : null
+                  if (m?.[1]) {
+                    ws.send(JSON.stringify({ type: 'read_file', path: m[1].trim() }))
+                  }
+                }
+              }
+            } catch {
+              // non-fatal sync hint
+            }
             setVoiceStatus('ready')
             break
+          }
           case 'speech':
             setLogs((prev) => [...prev, `{ Agent says: ${msg.text || '<reply>'} }`])
             pushMessage('leo', msg.text || '')
@@ -458,13 +475,13 @@ function CodeSpaceShell({
     }
     // Handle autonomous command dispatch - do not check socket readiness here,
     // the dispatch happens when the effect re-runs after socket connects
-    if (autoCommand === 'createFile') {
+    if (autoCommand === 'createFile' || autoCommand === 'writeFile') {
       const path = autoCommandPayload?.path || 'untitled.py'
       const code = autoCommandPayload?.code || ''
       if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({type: 'create_file', path, code}))
-        pushMessage('leo', '> Created ' + path)
-        pushLog('> Created ' + path)
+        socketRef.current.send(JSON.stringify({type: 'write_file', path, code}))
+        pushMessage('leo', autoCommand === 'writeFile' ? '> Updating ' + path : '> Created ' + path)
+        pushLog(autoCommand === 'writeFile' ? '> Updating ' + path : '> Created ' + path)
         setAutoCommand(null)
         setAutoCommandPayload(null)
       }
