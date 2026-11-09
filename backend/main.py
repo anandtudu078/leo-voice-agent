@@ -35,6 +35,7 @@ load_dotenv()
 # the engine is created.
 import repository
 from db import init_db, ping_database
+from pipeline.orchestrator import plan_from_transcript
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +177,61 @@ async def db_health():
     """Optional: database reachability probe. Returns instantly; the IDE does not use it by default."""
     database_ok = await asyncio.to_thread(ping_database)
     return {"database": "connected" if database_ok else "unavailable"}
+
+
+@app.post("/api/parse-voice-command")
+async def parse_voice_command(request: Request):
+    """Extract intent from a voice transcript using the Gemini planner.
+    Returns JSON: {"action": "create_file"|"create_folder"|"run", "payload": {path?, code?}}."""
+    body = await request.json()
+    transcript = body.get("transcript", "")
+    if not transcript:
+        return JSONResponse({"action": "none", "payload": None}, status_code=200)
+    try:
+        plan = await asyncio.to_thread(plan_from_transcript, transcript, [])
+        action = None
+        payload: dict | None = None
+        if plan.get("action") == "read" and plan.get("tool") == "read_file":
+            action = "readFile"
+            payload = {"path": plan.get("path")}
+        elif plan.get("action") == "write" and plan.get("tool") == "write_file":
+            action = "createFile"
+            payload = {"path": plan.get("path"), "code": plan.get("code")}
+        elif plan.get("action") == "run" and plan.get("tool") == "run_script":
+            action = "runFile"
+            payload = {"path": plan.get("path")}
+        else:
+            # fallback: try simple keyword match
+            tl = transcript.lower()
+            if "create a file" in tl or "new file" in tl:
+                # extract path after "create a file" or "new file"
+                import re
+                m = re.search(r"create a file (.+?)(\\.\\w+)?|new file (.+?)(\\.\\w+)?", tl)
+                if m:
+                    path = (m.group(1) or m.group(3)).strip()
+                    code = m.group(2) or m.group(4) or ""
+                    action = "createFile"
+                    payload = {"path": path, "code": code}
+            elif "create a folder" in tl or "new folder" in tl:
+                import re
+                m = re.search(r"create a folder (.+)|new folder (.+)", tl)
+                if m:
+                    path = (m.group(1) or m.group(2)).strip()
+                    action = "createFolder"
+                    payload = {"path": path}
+            elif "run" in tl or "execute" in tl:
+                import re
+                m = re.search(r"run (\\.\\w+)|execute (\\.\\w+)", tl)
+                if m:
+                    path = m.group(1) or m.group(2)
+                    action = "runFile"
+                    payload = {"path": path}
+            if not action:
+                action = "none"
+                payload = None
+        return JSONResponse({"action": action, "payload": payload}, status_code=200)
+    except Exception as e:
+        return JSONResponse({"action": "none", "payload": None, "error": str(e)}, status_code=200)
 
 
 @app.middleware("http")

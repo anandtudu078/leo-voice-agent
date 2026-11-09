@@ -146,6 +146,8 @@ function CodeSpaceShell({
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
   const [messages, setMessages] = useState<{ id: number; role: 'user' | 'leo'; text: string }[]>([])
   const [creationMode, setCreationMode] = useState<'none' | 'ask' | 'path'>('none')
+  const [autoCommand, setAutoCommand] = useState<'createFile' | 'createFolder' | 'runFile' | null>(null)
+  const [autoCommandPayload, setAutoCommandPayload] = useState<{path?: string, code?: string} | null>(null)
   const [folderSelectMode, setFolderSelectMode] = useState<'none' | 'ask' | 'chosen'>('none')
   const [commandInput, setCommandInput] = useState('')
 
@@ -305,6 +307,7 @@ function CodeSpaceShell({
             pushMessage('user', msg.transcript || '')
             setVoiceStatus('ready')
             setSttStatus('idle')
+            // Autonomous command processing is handled by a useEffect below
             break
           case 'code':
             setLogs((prev) => [...prev, `{ Agent: ${msg.code || ''} }`])
@@ -417,6 +420,33 @@ function CodeSpaceShell({
     }, 10000)
     return () => clearInterval(timer)
   }, [refreshTree])
+
+  // Process autonomous voice commands:
+  useEffect(() => {
+    if (autoCommand === 'createFile' && socketRef.current?.readyState === WebSocket.OPEN) {
+      const path = autoCommandPayload?.path || 'untitled.py'
+      const code = autoCommandPayload?.code || ''
+      socketRef.current.send(JSON.stringify({type: 'create_file', path, code}))
+      pushMessage('leo', '> Created ' + path)
+      pushLog('> Created ' + path)
+      setAutoCommand(null)
+      setAutoCommandPayload(null)
+    }
+    if (autoCommand === 'createFolder' && socketRef.current?.readyState === WebSocket.OPEN) {
+      const path = autoCommandPayload?.path || ''
+      socketRef.current.send(JSON.stringify({type: 'mkdir', path}))
+      pushMessage('leo', '> Created folder ' + path)
+      pushLog('> Created folder ' + path)
+      setAutoCommand(null)
+      setAutoCommandPayload(null)
+    }
+    if (autoCommand === 'runFile' && socketRef.current?.readyState === WebSocket.OPEN) {
+      const path = autoCommandPayload?.path || ''
+      socketRef.current.send(JSON.stringify({type: 'run_script', path}))
+      setAutoCommand(null)
+      setAutoCommandPayload(null)
+    }
+  }, [autoCommand, autoCommandPayload, socketRef])
   // ---- File operations (HTTP workspace API) ----
   const openFile = async (path: string) => {
     if (tabs.some((tab) => tab.path === path)) {
