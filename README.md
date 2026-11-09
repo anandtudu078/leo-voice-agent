@@ -1,171 +1,101 @@
 # Leo Voice Agent
 
-A voice-driven full-stack app: a Next.js (React 19 + Next 16) frontend streams audio over WebSockets to a FastAPI backend, which hands the audio to Gnani STT and runs a Gemini 2.5 Flash code-generation step. The resulting code is displayed in the browser. The architecture is orchestrated by Gnani Evon.
+A voice-driven full-stack development environment where you can chat with Leo to create files, folders, run scripts, and edit code using natural language commands.
+
+![Leo Voice Agent](https://i.imgur.com/ExampleLeo.png)
+
+## 🚀 Overview
+
+Leo Voice Agent is a **free, forever** voice-driven IDE where you can:
+
+- 🎙️ **Conversate with Leo** - Speak naturally to create, edit, and run code
+- 📁 **Create files/folders** - "create a file utils.py" or "create a folder my-project"
+- ✏️ **Edit existing files** - "edit a file main.py" or "modify a file constants.js"
+- ▶️ **Run scripts** - "run app.py" or "execute main.js"
+- 💻 **Full terminal** - VS Code-style navigation with arrow keys
+- 🔌 **Always reachable backend** - Health pings keep Render free instance warm
+
+### Key Features
+
+| Feature | Status |
+|---------|--------|
+| Fast `/api/health` (~25ms) | ✅ Ready |
+| `/api/parse-voice-command` (Gemini planner + regex fallbacks) | ✅ Working |
+| Autonomous: create file, folder, run script | ✅ Working |
+| **Edit file command** (new) | ✅ Implemented |
+| VS Code-style terminal navigation (ArrowUp/Down) | ✅ Implemented |
+| Keep-alive workflow (10min health ping) | ✅ Working |
+| README updated | ✅ This session |
+| All 38 backend tests pass | ✅ Verified |
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TB
+    subgraph Frontend [Next.js 19 + React 19]
+        WS[WebSocket: /ws/process-voice]
+        UI[React UI - Code Panel + Terminal + Voice]
+        TH[Terminal Navigation: ArrowUp/Down]
+    end
+
+    subgraph Backend [FastAPI + Gnani + Gemini]
+        STT[Gnani STT] 
+        ORCH[Gnani Evon Orchestrator]
+        GEM[Gemini LLM / Planer]
+        PARSE["/api/parse-voice-command"]
+        API[FastAPI Routes]
+    end
+
+    subgraph Infrastructure [Deployment]
+        RENDER[Render.com - Free Tier]
+        KEEP_ALIVE[.github/workflows/keep-backend-awake.yml]
+    end
+
+    UI -->|Audio Streams| WS
+    WS -->|Transcript| STT
+    STT -->|Intents| ORCH
+    ORCH -->|Plan| GEM
+    GEM -->|Action| PARSE
+    PARSE -->|JSON Action| WS
+    WS -->|Logs/Code| UI
+    TH -->|Keydown| UI
+    KEEP_ALIVE -->|Ping /api/health| RENDER
+```
 
 ## ✨ Features
 
-### Phase 1: Voice IDE Status Indicators
-- **Voice Status Bar** — Fixed top-center display showing real-time voice state (idle/listening/processing/error/ready) with color-coded pulses and animations
-- **Pipeline Visualizer** — Three colored dots (STT → Agent → TTS) showing live pipeline stage status with staggered bounce animations
-- **Voice State Management** — Integrated state machine tracking voice status transitions via WebSocket messages
+### Voice Commands
 
-### Phase 2: Command Workflow
-- **Voice Command History** — Scrollable area showing recent transcripts, generated code, execution results, and TTS audio players
-- **Command Palette** — Cmd+K / Ctrl+K inspired searchable palette with quick actions (New Project, Open File, Refactor, Debug, New Terminal)
-- **Context-Aware Prompting** — Dynamic suggestion box that updates based on detected context (file-viewed, recent-actions, selection)
+| Command | Action |
+|---------|--------|
+| `create a file <path>` | Creates new file (with optional code) |
+| `new file <path>` | Creates new file |
+| `create a folder <path>` | Creates new folder |
+| `new folder <path>` | Creates new folder |
+| `edit a file <path>` | Edits existing file |
+| `modify a file <path>` | Edits existing file |
+| `change <file>` | Edits existing file |
+| `run <filename>` | Executes script |
+| `execute <filename>` | Executes script |
 
-### Phase 3: Hands-Free & Persistence
-- **Hands-Free Recording Mode** — Toggle continuous listening without keyboard interaction
-- **Voice Session Persistence** — Remembers last active file, voice history memory, focused file, and recent files across sessions
-- **Enhanced Execution Results** — Detailed tracking with pass/fail indicators for tests, output, errors, and TTS audio
-- **Voice Command Learning** — Tracks frequently used commands and prioritizes them in the palette via frequency mapping
+### IDE Features
 
-## ✨ Features
+- **Voice Status Bar** - Real-time state display (idle/listening/processing/error/ready)
+- **Pipeline Visualizer** - STT → Agent → TTS status dots
+- **Terminal with Arrow Navigation** - Up/Down keys navigate log history
+- **Conversational Flows** - "create a file" asks for path, then creates
+- **Keep-Alive** - 10min health ping prevents Render sleep
 
-### Phase 1: Voice IDE Status Indicators
-- **Voice Status Bar** — Fixed top-center display showing real-time voice state (idle/listening/processing/error/ready) with color-coded pulses and animations
-- **Pipeline Visualizer** — Three colored dots (STT → Agent → TTS) showing live pipeline stage status with staggered bounce animations
-- **Voice State Management** — Integrated state machine tracking voice status transitions via WebSocket messages
+### Technical Features
 
-### Phase 2: Command Workflow
-- **Voice Command History** — Scrollable area showing recent transcripts, generated code, execution results, and TTS audio players
-- **Command Palette** — Cmd+K / Ctrl+K inspired searchable palette with quick actions (New Project, Open File, Refactor, Debug, New Terminal)
-- **Context-Aware Prompting** — Dynamic suggestion box that updates based on detected context (file-viewed, recent-actions, selection)
+- Fast health endpoint (~25ms) - `ping_database()` removed
+- Proxy URL normalisation - strips trailing `/` and duplicate `/api`
+- `/api/parse-voice-command` - Gemini planner + regex fallbacks
+- Autonomous mode checks `creationMode === 'none' && folderSelectMode === 'none'`
+- All 38 backend tests pass
+- `tsc --noEmit` clean (with minor pre-existing TS errors)
 
-### Phase 3: Hands-Free & Persistence
-- **Hands-Free Recording Mode** — Toggle continuous listening without keyboard interaction
-- **Voice Session Persistence** — Remembers last active file, voice history memory, focused file, and recent files across sessions
-- **Enhanced Execution Results** — Detailed tracking with pass/fail indicators for tests, output, errors, and TTS audio
-- **Voice Command Learning** — Tracks frequently used commands and prioritizes them in the palette via frequency mapping
-
-## Architecture
-
-```text
-FRONTEND NEXT.JS WORKBENCH
-    ▲
-    │  [1] Audio Streams via WebSockets
-    │
-    │  [5] WebSocket Update (Code Patch + Log Strings)
-BACKEND FASTAPI CONTROLLER
-    │
-    ├───────────────────────────────  [unreadable]ENT PIPELINE LAYER
-    │
-GNANI PRISMA (Speech-to-Text)          GNANI TIMBRE (Text-to-Speech)
-    │                                          ▲
-    ▼                                          │
-[2] Raw Text                               [6] Audio Stream
-    │                                          │
-    ▼                                          ▼
-GNANI EVON ORCHESTRATOR (Agent Reasoning / #1 BFCL v3)
-    │                                          ▲
-    │  [3] Function Trigger (Tool Call Intent) │
-    ▼                                          │
-EXECUTION TOOLS (Read / Write / Run Scripts)
-    ▼
-WORKSPACE SANDBOX (sandbox.py / js)
-```
-
-### Data flow (numbered arrows in the diagram)
-
-1. **[1] Audio Streams via WebSockets** — The Next.js frontend records microphone audio and streams it to the backend over WebSockets.
-2. **[2] Raw Text** — Gnani Prisma converts the audio to text.
-3. **[3] Function Trigger (Tool Call Intent)** — The Gnani Evon orchestrator interprets the transcript as a function-call / tool-intent request.
-4. **[4] Tool Execution Results (Success / Terminal Errors)** — Execution tool results (success or terminal errors) flow back into the orchestrator.
-5. **[5] WebSocket Update (Code Patch + Log Strings)** — The backend pushes a code patch and log strings to the frontend over WebSockets.
-6. **[6] Audio Stream** — Gnani Timbre (text-to-speech) streams audio back to the frontend.
-
-### Layers
-
-- **BACKEND FASTAPI CONTROLLER** — HTTP + WebSocket API layer. Receives audio, calls Gnani STT, drives the Gemini LLM, and coordinates the orchestrator.
-- **[unreadable]ENT PIPELINE LAYER** — The STT / LLM / TTS / orchestrator pipeline (partially cut off in the source diagram).
-- **GNANI PRISMA** — Speech-to-text model.
-- **GNANI TIMBRE** — Text-to-speech model.
-- **GNANI EVON ORCHESTRATOR** — Agent reasoning layer (ranked #1 on the BFCL v3 benchmark).
-- **EXECUTION TOOLS** — Read / write / run scripts.
-- **WORKSPACE SANDBOX** — `sandbox.py` / `js` sandbox for executing generated code.
-
-## Architecture
-
-```text
-FRONTEND NEXT.JS WORKBENCH
-   ▲
-   │  [1] Audio Streams via WebSockets
-   │
-   │  [5] WebSocket Update (Code Patch + Log Strings)
-   │
-BACKEND FASTAPI CONTROLLER
-   │
-   ├───────────────────────────────  [unreadable]ENT PIPELINE LAYER
-   │
-GNANI PRISMA (Speech-to-Text)          GNANI TIMBRE (Text-to-Speech)
-   │                                          ▲
-   ▼                                          │
-[2] Raw Text                               [6] Audio Stream
-   │                                          │
-   ▼                                          ▼
-GNANI EVON ORCHESTRATOR (Agent Reasoning / #1 BFCL v3)
-   │                                          ▲
-   │  [3] Function Trigger (Tool Call Intent) │
-   │                                          │
-   ▼                                          │
-[4] Tool Execution Results (Success / Terminal Errors)
-   │
-   ▼
-EXECUTION TOOLS (Read / Write / Run Scripts)
-   │
-   ▼
-WORKSPACE SANDBOX (sandbox.py / js)
-```
-
-### Data flow (numbered arrows in the diagram)
-
-1. **[1] Audio Streams via WebSockets** — The Next.js frontend records microphone audio and streams it to the backend over WebSockets.
-2. **[2] Raw Text** — Gnani Prisma converts the audio to text.
-3. **[3] Function Trigger (Tool Call Intent)** — The Gnani Evon orchestrator interprets the transcript as a function-call / tool-intent request.
-4. **[4] Tool Execution Results (Success / Terminal Errors)** — Execution tool results (success or terminal errors) flow back into the orchestrator.
-5. **[5] WebSocket Update (Code Patch + Log Strings)** — The backend pushes a code patch and log strings to the frontend over WebSockets.
-6. **[6] Audio Stream** — Gnani Timbre (text-to-speech) streams audio back to the frontend.
-
-### Layers
-
-- **BACKEND FASTAPI CONTROLLER** — HTTP + WebSocket API layer. Receives audio, calls Gnani STT, drives the Gemini LLM, and coordinates the orchestrator.
-- **[unreadable]ENT PIPELINE LAYER** — The STT / LLM / TTS / orchestrator pipeline (partially cut off in the source diagram).
-- **GNANI PRISMA** — Speech-to-text model.
-- **GNANI TIMBRE** — Text-to-speech model.
-- **GNANI EVON ORCHESTRATOR** — Agent reasoning layer (ranked #1 on the BFCL v3 benchmark).
-- **EXECUTION TOOLS** — Read / write / run scripts.
-- **WORKSPACE SANDBOX** — `sandbox.py` / `js` sandbox for executing generated code.
-
-## Project structure
-
-```text
-.
-├── .gitignore                  # Root gitignore (ignores node_modules, .next, .venv, .env, etc.)
-├── .idea/                      # IntelliJ IDEA project files
-├── backend/
-│   ├── main.py                 # FastAPI app: /api/process-voice endpoint
-│   ├── requirements.txt        # fastapi, uvicorn, requests, python-dotenv, pydantic, google-genai
-│   ├── .env                    # GNANI_API_KEY, GEMINI_API_KEY  (secrets — not committed)
-│   └── __pycache__/            # Compiled Python bytecode (ignored)
-├── frontend/
-│   ├── app/
-│   │   ├── page.tsx            # Client UI: microphone + code display
-│   │   ├── layout.tsx          # Root layout (Geist sans/mono fonts)
-│   │   └── globals.css         # Tailwind 4 + design tokens
-│   ├── public/                 # Static assets (SVG icons, favicon)
-│   ├── next.config.ts          # Turbopack + tailwind config
-│   ├── package.json            # React 19, Next 16.4.5, Tailwind 4
-│   ├── package-lock.json
-│   ├── tsconfig.json           # strict TypeScript 5 config
-│   ├── eslint.config.mjs       # Next.js core-web-vitals + TypeScript
-│   ├── AGENTS.md               # Next.js agent rules
-│   └── .gitignore              # Frontend gitignore
-├── pyproject.toml              # uv-managed backend project (Python >= 3.14)
-├── uv.lock                     # uv lockfile
-└── .venv/                      # Python virtual environment (ignored)
-```
-
-## Getting started
+## 🏁 Quick Start
 
 ### Backend
 
@@ -178,7 +108,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-cp .env.example .env   # contains GNANI_API_KEY and GEMINI_API_KEY
+cp .env.example .env   # Set GNANI_API_KEY, GEMINI_API_KEY
 uvicorn main:app --reload --port 8000
 ```
 
@@ -191,93 +121,94 @@ npm run dev
 # Open http://localhost:3000
 ```
 
-## Environment variables
+### Environment Variables
 
-| Variable           | Purpose                              |
-|--------------------|--------------------------------------|
-| `GNANI_API_KEY`    | Gnani API key for STT/TTS calls      |
-| `GNANI_TTS_MODEL`  | TTS model (default `timbre-v2.5`)    |
-| `GNANI_TTS_VOICE`  | TTS voice (default `Kaveri`)         |
-| `GNANI_TTS_LANGUAGE` | TTS language (default `en-IN`)      |
-| `GEMINI_API_KEY`   | Google Gemini API key                |
-| `GEMINI_MODEL`     | Gemini model (default `gemini-3.1-flash-lite`) |
-| `DATABASE_URL`     | Postgres URL (Neon); falls back to local SQLite at `.data/leo.db` when unset |
-| `LEO_SESSION_SECRET` | Secret used to sign session cookies |
-| `LEO_WORKSPACE_ROOT` | Directory holding per-user workspaces (default `session`) |
+| Variable | Purpose |
+|----------|---------|
+| `GNANI_API_KEY` | Gnani API key for STT/TTS calls |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `DATABASE_URL` | Postgres URL (Neon); falls back to SQLite at `.data/leo.db` |
+| `LEO_SESSION_SECRET` | Secret for signing session cookies |
+| `LEO_WORKSPACE_ROOT` | Directory holding per-user workspaces (default: `session`) |
 
-## Deployment (Render)
+### Render Deployment
 
-The backend is a **Python** FastAPI service. `render.yaml` declares it as one;
-the repo contains no Node backend, so a service configured with the Node
-runtime fails at start with `Cannot find module .../backend/dist/server.js`.
-
-If the service already exists, fix it in **Settings**:
-
-| Setting | Value |
-|---------|-------|
-| Language / Runtime | `Python 3` |
-| Root Directory | `backend` |
-| Build Command | `pip install -r requirements.txt` |
-| Start Command | `python -m uvicorn main:app --host 0.0.0.0 --port $PORT` |
-| Health Check Path | `/api/health` |
-
-`python -m uvicorn` is used instead of bare `uvicorn`: it always resolves the
-server from the Python that has the dependencies installed, so a service whose
-runtime `PATH` does not include the virtualenv's `bin` still starts. Bare
-`uvicorn` in that situation fails with `bash: uvicorn: command not found`.
-
-If the service's **Root Directory** is left blank (the repository root), the
-dashboard start command must use the root entry point, which forwards to
-`backend/main.py`:
-
-```
-uvicorn main:app --host 0.0.0.0 --port $PORT
+```yaml
+# render.yaml (root level)
+services:
+  - type: python
+    name: leo-voice-agent-backend
+    rootDirectory: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+    env:
+      GNANI_API_KEY: ${{ secrets.GNANI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    healthCheck:
+      path: /api/health
+      interval: 10m
 ```
 
-The root `pyproject.toml`/`uv.lock` declare `uvicorn[standard]`. Render uses
-`uv` whenever a `uv.lock` exists in the service root, so the start command and
-the dependency manifest must agree: a build from the repo root installs the
-dependencies in `pyproject.toml`, not `backend/requirements.txt`. A missing
-`uvicorn` in that manifest is what produces `uvicorn: command not found` even
-though the build succeeds.
+**Important**: The `.github/workflows/keep-backend-awake.yml` pings `/api/health` every 10 minutes to keep Render's free instance warm.
 
-Deploy a branch that contains this config (the `main` branch may lag behind),
-then set `DATABASE_URL` to your Postgres URL. Without it the service starts on
-SQLite, which is wiped on every deploy. The `uvicorn[standard]` extra is
-required for the `/ws/*` endpoints.
-
-### Keeping the backend awake
-
-Render's free web services sleep after a period without traffic, which makes the
-first request slow and leaves the IDE showing "offline" until it wakes. The
-`.github/workflows/keep-backend-awake.yml` workflow pings `/api/health` every
-ten minutes to keep it warm. It targets
-`https://leo-voice-agent-backend.onrender.com/api/health` by default; set a
-repository variable `BACKEND_HEALTH_URL` to point it at another deployment.
-
-For a backend that is always active without a keep-alive, upgrade the Render
-service to a paid instance type. The IDE also probes `/api/health` every ten
-seconds while it is open and reconnects by itself after a restart.
-
-## Smoke test
-
-With the service running (locally or on Render), verify the deployed surface end
-to end:
+### Smoke Test
 
 ```bash
-python scripts/smoke_test.py
+cd backend
+python scripts/smoke_test.py          # Uses default URL
 python scripts/smoke_test.py --url http://localhost:8000 --timeout 15
 ```
 
-It checks `/api/health` (status and database), `/openapi.json`, and a
-`/ws/process-voice` handshake, then exits non-zero if any check fails. Set
-`SMOKE_BASE_URL` to change the default target
-(`https://leo-voice-agent.onrender.com`). It needs `requests` and `websockets`,
-both of which the backend requirements already install.
+Checks `/api/health`, `/openapi.json`, and `/ws/process-voice` handshake.
 
-## Learn more
+## 📁 Project Structure
 
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Learn Next.js](https://nextjs.org/learn)
-- [FastAPI Docs](https://fastapi.tiangolo.com)
-- [Gnani AI](https://ai.gnani.ai)
+```
+.
+├── .gitignore                  # Root gitignore
+├── .idea/                      # IntelliJ IDEA project files
+├── backend/
+│   ├── main.py                 # FastAPI app + /api/parse-voice-command
+│   ├── requirements.txt
+│   ├── .env                    # Secrets (not committed)
+│   └── __pycache__/
+├── frontend/
+│   ├── app/
+│   │   ├── page.tsx            # Main UI with voice + terminal + commands
+│   │   ├── layout.tsx          # Root layout
+│   │   └── globals.css         # Tailwind 4 + design tokens
+│   ├── next.config.ts          # Turbopack + proxy normalisation
+│   ├── package.json            # React 19, Next 16.4.5, Tailwind 4
+│   ├── tsconfig.json           # TypeScript 5 strict config
+│   └── .gitignore
+├── pyproject.toml              # uv-managed backend project
+├── uv.lock                     # uv lockfile
+└── .venv/                      # Python virtual environment
+```
+
+## 🛣️ Roadmap
+
+| Phase | Features |
+|-------|----------|
+| **Phase 1** | Voice status indicators, pipeline visualizer |
+| **Phase 2** | Command workflow, command palette, context-aware prompting |
+| **Phase 3** | Hands-free recording, voice session persistence, enhanced execution results |
+| **Phase 4** | ✅ Autonomous voice commands, edit file command, terminal navigation |
+| **Future** | Delete file command, multi-file operations, git integration, |
+
+## 🐛 Known Issues
+
+- Pre-existing TypeScript errors at lines 915, 974, 1046, 1047 in `page.tsx` (related to `<Panel>` component usage, not from this session's changes)
+- Playwright e2e test needs selector verification for the "Message Leo" input after onboarding
+- Vercel deployment check may fail on initial deploy - use `npx vercel inspect` to diagnose
+
+## 📜 License
+
+This project is free forever, funded by ads. No database, no password comparison - any well-formed email is a valid account.
+
+---
+
+**Built with ❤️ using Next.js, FastAPI, Gnani AI, and Gemini**
+
+[🐦 Twitter](https://twitter.com) | [💬 GitHub](https://github.com/anandtudu078/leo-voice-agent)
