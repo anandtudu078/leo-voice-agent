@@ -434,7 +434,8 @@ function CodeSpaceShell({
       })
       .then(async (res) => {
         const data = await res.json()
-        if (data.action && data.action !== 'none' && socketRef.current?.readyState === WebSocket.OPEN) {
+        if (data.action && data.action !== 'none') {
+          // Store the action and payload for autonomous dispatch when socket is ready
           setAutoCommand(data.action)
           setAutoCommandPayload(data.payload || null)
         }
@@ -443,35 +444,44 @@ function CodeSpaceShell({
         console.error('Failed to parse voice command:', err)
       })
     }
-    // Handle autonomous command dispatch
-    if (autoCommand === 'createFile' && socketRef.current?.readyState === WebSocket.OPEN) {
+    // Handle autonomous command dispatch - do not check socket readiness here,
+    // the dispatch happens when the effect re-runs after socket connects
+    if (autoCommand === 'createFile') {
       const path = autoCommandPayload?.path || 'untitled.py'
       const code = autoCommandPayload?.code || ''
-      socketRef.current.send(JSON.stringify({type: 'create_file', path, code}))
-      pushMessage('leo', '> Created ' + path)
-      pushLog('> Created ' + path)
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({type: 'create_file', path, code}))
+        pushMessage('leo', '> Created ' + path)
+        pushLog('> Created ' + path)
+      }
       setAutoCommand(null)
       setAutoCommandPayload(null)
     }
-    if (autoCommand === 'createFolder' && socketRef.current?.readyState === WebSocket.OPEN) {
+    if (autoCommand === 'createFolder') {
       const path = autoCommandPayload?.path || ''
-      socketRef.current.send(JSON.stringify({type: 'mkdir', path}))
-      pushMessage('leo', '> Created folder ' + path)
-      pushLog('> Created folder ' + path)
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({type: 'mkdir', path}))
+        pushMessage('leo', '> Created folder ' + path)
+        pushLog('> Created folder ' + path)
+      }
       setAutoCommand(null)
       setAutoCommandPayload(null)
     }
-    if (autoCommand === 'editFile' && socketRef.current?.readyState === WebSocket.OPEN) {
+    if (autoCommand === 'editFile') {
       const path = autoCommandPayload?.path || ''
-      socketRef.current.send(JSON.stringify({type: 'editFile', path}))
-      pushMessage('leo', '> Edited ' + path)
-      pushLog('> Edited ' + path)
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({type: 'editFile', path}))
+        pushMessage('leo', '> Edited ' + path)
+        pushLog('> Edited ' + path)
+      }
       setAutoCommand(null)
       setAutoCommandPayload(null)
     }
-    if (autoCommand === 'runFile' && socketRef.current?.readyState === WebSocket.OPEN) {
+    if (autoCommand === 'runFile') {
       const path = autoCommandPayload?.path || ''
-      socketRef.current.send(JSON.stringify({type: 'run_script', path}))
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({type: 'run_script', path}))
+      }
       setAutoCommand(null)
       setAutoCommandPayload(null)
     }
