@@ -149,13 +149,19 @@ def _email_signin_response(user: dict) -> JSONResponse:
 
 app = FastAPI(title="Leo Voice Agent API")
 
-# CORS middleware — allow the Vercel frontend (and localhost for dev)
+# CORS middleware — allow Vercel (production + previews), localhost, and an
+# explicit FRONTEND_URL. Needed for direct browser->backend calls (e.g. WebSocket
+# from a Vercel preview to Render); Next.js rewrites are server-side and bypass CORS.
+_frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        os.getenv("FRONTEND_URL", "http://localhost:3000"),
+        _frontend_url,
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
         "https://leo-voice-agent.vercel.app",
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -407,10 +413,8 @@ async def echo(msg: str = Body(default="hello")):
     ]}
 
 
-# CORS middleware is disabled: the Next.js frontend proxies /api/* to
-# http://localhost:8000/api/*, so the browser never sends cross-origin
-# requests to the backend directly. Remove CORSMiddleware to avoid the known
-# Starlette bug where it crashes on 404 responses.
+# Note: /api/* is often proxied by Next.js, but the browser also connects directly
+# to this backend for WebSocket (ws/wss). CORS is configured above.
 
 # Initialize Google Gemini using the new google-genai SDK
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))

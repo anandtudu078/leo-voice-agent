@@ -2,7 +2,11 @@ import type { NextConfig } from 'next'
 
 // Trailing slashes and a duplicated /api suffix are common causes of 404s
 // when the backend URL is pasted from a dashboard, so normalise it here.
-const backendBase = (process.env.NEXT_BACKEND_URL || 'http://localhost:8000')
+const backendBase = (
+  process.env.NEXT_BACKEND_URL ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  'http://localhost:8000'
+)
   .trim()
   .replace(/\/+$/, '')
   .replace(/\/api$/, '')

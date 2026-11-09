@@ -54,15 +54,24 @@ function Providers({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password: '' }),
       })
-      const data = await res.json().catch(() => ({})) as { user?: unknown }
-      if (res.ok && data && typeof data === 'object' && (data as { user?: unknown }).user) {
-        setSession({ user: { email: typeof (data as { user: unknown }).user === 'string' ? '' : (data as { user: { email: string } }).user.email } })
+      const raw = await res.text()
+      let data: { user?: { email?: string }; detail?: string } = {}
+      try {
+        data = raw ? (JSON.parse(raw) as typeof data) : {}
+      } catch {
+        // non-JSON response (e.g. proxy/gateway error page)
+      }
+      if (res.ok && data.user?.email) {
+        setSession({ user: { email: data.user.email } })
         return true
       }
-      window.alert((data as { detail?: string }).detail || 'Invalid email or password.')
+      const detail =
+        data.detail ||
+        (res.ok ? 'Sign-in failed: unexpected response.' : `Sign-in failed (HTTP ${res.status}).`)
+      window.alert(detail)
       return false
-    } catch {
-      window.alert('Network error. Please try again.')
+    } catch (err) {
+      window.alert(`Network error. Please try again.${err instanceof Error ? ` (${err.message})` : ''}`)
       return false
     }
   }

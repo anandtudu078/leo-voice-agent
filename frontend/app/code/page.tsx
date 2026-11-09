@@ -254,8 +254,17 @@ function CodeSpaceShell({
   // ---- WebSocket connection ----
   const connect = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN) return
-    const backendUrl = process.env.NEXT_BACKEND_URL || 'http://localhost:8000'
-    const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws/process-voice`
+    const resolveBackendUrl = () => {
+      const fromEnv = (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim()
+      if (fromEnv) return fromEnv.replace(/\/+$/, '').replace(/\/api$/, '')
+      if (typeof window !== 'undefined') {
+        const host = window.location.hostname
+        if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000'
+      }
+      return 'https://leo-voice-agent.onrender.com'
+    }
+    const backendUrl = resolveBackendUrl()
+    const wsUrl = `${backendUrl.replace(/^http/i, 'ws')}/ws/process-voice`
     const ws = new WebSocket(wsUrl)
     socketRef.current = ws
 
