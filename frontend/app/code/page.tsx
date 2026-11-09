@@ -147,7 +147,7 @@ function CodeSpaceShell({
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
   const [messages, setMessages] = useState<{ id: number; role: 'user' | 'leo'; text: string }[]>([])
   const [creationMode, setCreationMode] = useState<'none' | 'ask' | 'path'>('none')
-  const [autoCommand, setAutoCommand] = useState<'createFile' | 'createFolder' | 'runFile' | null>(null)
+  const [autoCommand, setAutoCommand] = useState<'createFile' | 'createFolder' | 'editFile' | 'runFile' | null>(null)
   const [autoCommandPayload, setAutoCommandPayload] = useState<{path?: string, code?: string} | null>(null)
   const [folderSelectMode, setFolderSelectMode] = useState<'none' | 'ask' | 'chosen'>('none')
   const [commandInput, setCommandInput] = useState('')
@@ -962,7 +962,7 @@ function CodeSpaceShell({
             )}
 
             {panelTab === 'terminal' && (
-              <div className="flex flex-col h-full min-h-0 font-mono text-xs" tabindex="0" onKeyDown={(e) => {
+              <div className="flex flex-col h-full min-h-0 font-mono text-xs" tabIndex={0} onKeyDown={(e) => {
                 if (e.key === 'ArrowUp') {
                   e.preventDefault()
                   setActiveLog((prev) => prev > 0 ? prev - 1 : logs.length - 1)
@@ -988,6 +988,7 @@ function CodeSpaceShell({
                     <div className="text-white/25">$ Run a file to see its output here.</div>
                   )}
                 </div>
+              </div>
             )}
 
             {panelTab === 'problems' && (
