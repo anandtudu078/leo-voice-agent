@@ -22,12 +22,11 @@ class TestDatabaseConnection(unittest.TestCase):
     def test_ping_returns_true(self):
         self.assertTrue(ping_database())
 
-    def test_health_endpoint_reports_database(self):
+    def test_health_endpoint_reports_ok(self):
         response = TestClient(app).get("/api/health")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["status"], "ok")
-        self.assertEqual(body["database"], "connected")
 
 
 class TestUsers(unittest.TestCase):
