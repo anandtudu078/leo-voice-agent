@@ -52,15 +52,20 @@ type ExplanationState = {
   error: string | null
 }
 
-function classifyExplanationResponse(text: string): 'agree' | 'decline' | 'other' {
+function classifyExplanationResponse(
+  text: string,
+): 'agree' | 'decline' | 'other' {
   const t = text.trim().toLowerCase()
   if (!t) return 'other'
-  const agree = /\b(yes|yeah|yep|sure|ok|okay|explain|teach|walk\s*me|go\s*ahead|please\s+explain|show\s+me)\b/
-  const decline = /\b(no|nope|nah|skip|not\s+now|continue|later|don'?t|do\s+not)\b/
+  const agree =
+    /\b(yes|yeah|yep|sure|ok|okay|explain|teach|walk\s*me|go\s*ahead|please\s+explain|show\s+me)\b/
+  const decline =
+    /\b(no|nope|nah|skip|not\s+now|continue|later|don'?t|do\s+not)\b/
   const hasAgree = agree.test(t)
   const hasDecline = decline.test(t)
   // "no, run it" / "continue and run" => treat as other command (continue based on voice command)
-  const commandy = /\b(run|create|write|edit|open|delete|rename|save|build|fix|change|add|make|show|list)\b/
+  const commandy =
+    /\b(run|create|write|edit|open|delete|rename|save|build|fix|change|add|make|show|list)\b/
   if (hasDecline && commandy.test(t)) return 'other'
   if (hasAgree && !hasDecline) return 'agree'
   if (hasDecline && !hasAgree) return 'decline'
@@ -82,7 +87,9 @@ async function fetchExplanation(payload: {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const detail = (data as { detail?: string }).detail || `Explanation failed (HTTP ${res.status})`
+    const detail =
+      (data as { detail?: string }).detail ||
+      `Explanation failed (HTTP ${res.status})`
     throw new Error(detail)
   }
   const steps = (data as { steps?: ExplanationStep[] }).steps
@@ -118,12 +125,20 @@ export default function CodeSpace() {
   const [user, setUser] = useState<{ email: string }>({ email: '' })
 
   // Voice status state machine
-  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'>('idle')
+  const [voiceStatus, setVoiceStatus] = useState<
+    'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'
+  >('idle')
 
   // Pipeline stage states
-  const [sttStatus, setSttStatus] = useState<'idle' | 'listening' | 'error'>('idle')
-  const [agentStatus, setAgentStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle')
-  const [ttsStatus, setTtsStatus] = useState<'idle' | 'speaking' | 'error'>('idle')
+  const [sttStatus, setSttStatus] = useState<'idle' | 'listening' | 'error'>(
+    'idle',
+  )
+  const [agentStatus, setAgentStatus] = useState<
+    'idle' | 'processing' | 'done' | 'error'
+  >('idle')
+  const [ttsStatus, setTtsStatus] = useState<'idle' | 'speaking' | 'error'>(
+    'idle',
+  )
 
   // Sync session email with backend
   useEffect(() => {
@@ -182,7 +197,9 @@ function CodeSpaceShell({
 }: {
   user: { email: string }
   voiceStatus: 'idle' | 'listening' | 'processing' | 'disconnected' | 'ready'
-  setVoiceStatus: (status: 'idle' | 'listening' | 'processing' | 'disconnected' | 'ready') => void
+  setVoiceStatus: (
+    status: 'idle' | 'listening' | 'processing' | 'disconnected' | 'ready',
+  ) => void
   sttStatus: 'idle' | 'listening' | 'error'
   setSttStatus: (s: 'idle' | 'listening' | 'error') => void
   agentStatus: 'idle' | 'processing' | 'done' | 'error'
@@ -208,14 +225,28 @@ function CodeSpaceShell({
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showSuggestion, setShowSuggestion] = useState(true)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
-  const [messages, setMessages] = useState<{ id: number; role: 'user' | 'leo'; text: string }[]>([])
-  const [creationMode, setCreationMode] = useState<'none' | 'ask' | 'path'>('none')
-  const [autoCommand, setAutoCommand] = useState<'createFile' | 'writeFile' | 'createFolder' | 'editFile' | 'runFile' | null>(null)
-  const [autoCommandPayload, setAutoCommandPayload] = useState<{path?: string, code?: string} | null>(null)
-  const [folderSelectMode, setFolderSelectMode] = useState<'none' | 'ask' | 'chosen'>('none')
+  const [panelTab, setPanelTab] = useState<
+    'terminal' | 'output' | 'problems' | 'voice'
+  >('output')
+  const [messages, setMessages] = useState<
+    { id: number; role: 'user' | 'leo'; text: string }[]
+  >([])
+  const [creationMode, setCreationMode] = useState<'none' | 'ask' | 'path'>(
+    'none',
+  )
+  const [autoCommand, setAutoCommand] = useState<
+    'createFile' | 'writeFile' | 'createFolder' | 'editFile' | 'runFile' | null
+  >(null)
+  const [autoCommandPayload, setAutoCommandPayload] = useState<{
+    path?: string
+    code?: string
+  } | null>(null)
+  const [folderSelectMode, setFolderSelectMode] = useState<
+    'none' | 'ask' | 'chosen'
+  >('none')
   const [commandInput, setCommandInput] = useState('')
-  const [pendingExplanation, setPendingExplanation] = useState<PendingExplanation | null>(null)
+  const [pendingExplanation, setPendingExplanation] =
+    useState<PendingExplanation | null>(null)
   const [explanation, setExplanation] = useState<ExplanationState | null>(null)
   const [lastUserGoal, setLastUserGoal] = useState('')
 
@@ -242,21 +273,29 @@ function CodeSpaceShell({
 
   const pushMessage = useCallback((role: 'user' | 'leo', text: string) => {
     if (!text) return
-    setMessages((prev) => [...prev.slice(-59), { id: ++messageIdRef.current, role, text }])
+    setMessages((prev) => [
+      ...prev.slice(-59),
+      { id: ++messageIdRef.current, role, text },
+    ])
   }, [])
 
   const blobToDataUrl = (blob: Blob) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader()
-      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : '')
-      reader.onerror = () => reject(reader.error ?? new Error('Could not read the recording'))
+      reader.onloadend = () =>
+        resolve(typeof reader.result === 'string' ? reader.result : '')
+      reader.onerror = () =>
+        reject(reader.error ?? new Error('Could not read the recording'))
       reader.readAsDataURL(blob)
     })
 
   const activeTab = activeFile
-  const activeContent = tabs.find((tab) => tab.path === activeFile)?.content ?? ''
+  const activeContent =
+    tabs.find((tab) => tab.path === activeFile)?.content ?? ''
   const activeExplainRange =
-    explanation && explanation.path === activeFile && explanation.steps[explanation.index]
+    explanation &&
+    explanation.path === activeFile &&
+    explanation.steps[explanation.index]
       ? {
           startLine: explanation.steps[explanation.index].startLine,
           endLine: explanation.steps[explanation.index].endLine,
@@ -278,10 +317,22 @@ function CodeSpaceShell({
   const statusBadge = useMemo(() => {
     const map: Record<string, { label: string; css: string }> = {
       idle: { label: 'Idle', css: 'bg-white/10 text-white/60 border-white/10' },
-      listening: { label: 'Listening', css: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-      processing: { label: 'Processing', css: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-      disconnected: { label: 'Disconnected', css: 'bg-red-500/20 text-red-400 border-red-500/30' },
-      ready: { label: 'Live', css: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+      listening: {
+        label: 'Listening',
+        css: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+      },
+      processing: {
+        label: 'Processing',
+        css: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+      },
+      disconnected: {
+        label: 'Disconnected',
+        css: 'bg-red-500/20 text-red-400 border-red-500/30',
+      },
+      ready: {
+        label: 'Live',
+        css: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      },
     }
     return map[voiceStatus] || map.idle
   }, [voiceStatus])
@@ -294,7 +345,9 @@ function CodeSpaceShell({
   const adoptFile = useCallback((path: string, content: string) => {
     setTabs((prev) =>
       prev.some((tab) => tab.path === path)
-        ? prev.map((tab) => (tab.path === path ? { ...tab, content, saved: content } : tab))
+        ? prev.map((tab) =>
+            tab.path === path ? { ...tab, content, saved: content } : tab,
+          )
         : [...prev, { path, content, saved: content }],
     )
     setActiveFile(path)
@@ -339,14 +392,20 @@ function CodeSpaceShell({
         if (!steps.length) {
           setExplanation((prev) =>
             prev && prev.path === path
-              ? { ...prev, loading: false, error: 'No explanation steps were generated.' }
+              ? {
+                  ...prev,
+                  loading: false,
+                  error: 'No explanation steps were generated.',
+                }
               : prev,
           )
         }
       } catch (err) {
         const message = describeError(err)
         setExplanation((prev) =>
-          prev && prev.path === path ? { ...prev, loading: false, error: message } : prev,
+          prev && prev.path === path
+            ? { ...prev, loading: false, error: message }
+            : prev,
         )
         pushLog(`ERROR: could not explain ${path} — ${message}`)
       }
@@ -360,13 +419,19 @@ function CodeSpaceShell({
       if (!pending) return false
       const kind = classifyExplanationResponse(text)
       if (kind === 'agree') {
-        pushMessage('leo', `Sure — I’ll explain ${baseName(pending.path)} and its syntax.`)
+        pushMessage(
+          'leo',
+          `Sure — I’ll explain ${baseName(pending.path)} and its syntax.`,
+        )
         void startExplanation(pending)
         return true
       }
       if (kind === 'decline') {
         setPendingExplanation(null)
-        pushMessage('leo', 'Okay, I’ll skip the explanation. Tell me what to do next.')
+        pushMessage(
+          'leo',
+          'Okay, I’ll skip the explanation. Tell me what to do next.',
+        )
         return true
       }
       // Other command: dismiss prompt and let normal command handling continue.
@@ -379,7 +444,8 @@ function CodeSpaceShell({
   const refreshTree = useCallback(async () => {
     try {
       setFiles(await listWorkspace())
-      if (offlineRef.current) pushLog('> Backend reconnected — workspace reloaded')
+      if (offlineRef.current)
+        pushLog('> Backend reconnected — workspace reloaded')
       offlineRef.current = false
       setOffline(false)
     } catch (err) {
@@ -431,7 +497,8 @@ function CodeSpaceShell({
       }
       if (typeof window !== 'undefined') {
         const host = window.location.hostname
-        if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000'
+        if (host === 'localhost' || host === '127.0.0.1')
+          return 'http://localhost:8000'
       }
       return fallbackUrls[wsFallbackIndexRef.current] || fallbackUrls[0]
     }
@@ -502,15 +569,31 @@ function CodeSpaceShell({
               setFiles((prev) => {
                 if (prev.some((f) => f.path === p)) return prev
                 const name = p.split('/').pop() || p
-                return [...prev, { path: p, name, kind: 'file' as const }].sort((a, b) => a.path.localeCompare(b.path))
+                return [...prev, { path: p, name, kind: 'file' as const }].sort(
+                  (a, b) => a.path.localeCompare(b.path),
+                )
               })
               // v1: after the agent writes code, ask before explaining it.
               if (content.trim() && !explainedPathsRef.current.has(p)) {
                 explainedPathsRef.current.add(p)
                 const goal = lastUserGoalRef.current || transcript || ''
-                const language = p.endsWith('.py') ? 'python' : p.endsWith('.ts') || p.endsWith('.tsx') ? 'typescript' : p.endsWith('.js') || p.endsWith('.jsx') ? 'javascript' : 'code'
-                setPendingExplanation({ path: p, code: content, language, goal })
-                pushMessage('leo', `I’ve written ${baseName(p)}. Should I explain the code and syntax line by line?`)
+                const language = p.endsWith('.py')
+                  ? 'python'
+                  : p.endsWith('.ts') || p.endsWith('.tsx')
+                    ? 'typescript'
+                    : p.endsWith('.js') || p.endsWith('.jsx')
+                      ? 'javascript'
+                      : 'code'
+                setPendingExplanation({
+                  path: p,
+                  code: content,
+                  language,
+                  goal,
+                })
+                pushMessage(
+                  'leo',
+                  `I’ve written ${baseName(p)}. Should I explain the code and syntax line by line?`,
+                )
                 setPanelOpen(true)
                 setPanelTab('voice')
               }
@@ -529,14 +612,20 @@ function CodeSpaceShell({
               const kind = classifyExplanationResponse(t)
               if (kind === 'agree') {
                 skipNextAutoParseRef.current = t
-                pushMessage('leo', `Sure — I’ll explain ${baseName(pendingExplanationRef.current.path)} and its syntax.`)
+                pushMessage(
+                  'leo',
+                  `Sure — I’ll explain ${baseName(pendingExplanationRef.current.path)} and its syntax.`,
+                )
                 void startExplanation(pendingExplanationRef.current)
                 break
               }
               if (kind === 'decline') {
                 skipNextAutoParseRef.current = t
                 setPendingExplanation(null)
-                pushMessage('leo', 'Okay, I’ll skip the explanation. Tell me what to do next.')
+                pushMessage(
+                  'leo',
+                  'Okay, I’ll skip the explanation. Tell me what to do next.',
+                )
                 break
               }
               // "other" => clear prompt and let autonomous command parsing proceed.
@@ -563,9 +652,14 @@ function CodeSpaceShell({
               const wsOpen = ws?.readyState === WebSocket.OPEN
               if (wsOpen) {
                 for (const line of lines) {
-                  const m = typeof line === 'string' ? line.match(/^>\s*Saved\s+(.+?)\s+\(/) : null
+                  const m =
+                    typeof line === 'string'
+                      ? line.match(/^>\s*Saved\s+(.+?)\s+\(/)
+                      : null
                   if (m?.[1]) {
-                    ws.send(JSON.stringify({ type: 'read_file', path: m[1].trim() }))
+                    ws.send(
+                      JSON.stringify({ type: 'read_file', path: m[1].trim() }),
+                    )
                   }
                 }
               }
@@ -576,7 +670,10 @@ function CodeSpaceShell({
             break
           }
           case 'speech':
-            setLogs((prev) => [...prev, `{ Agent says: ${msg.text || '<reply>'} }`])
+            setLogs((prev) => [
+              ...prev,
+              `{ Agent says: ${msg.text || '<reply>'} }`,
+            ])
             pushMessage('leo', msg.text || '')
             setVoiceStatus('ready')
             setAgentStatus('done')
@@ -585,7 +682,8 @@ function CodeSpaceShell({
               if (base64) {
                 const binary = atob(base64)
                 const bytes = new Uint8Array(binary.length)
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+                for (let i = 0; i < binary.length; i++)
+                  bytes[i] = binary.charCodeAt(i)
                 // Gnani returns WAV; keep the blob URL alive until playback ends.
                 const blob = new Blob([bytes], { type: 'audio/wav' })
                 const url = URL.createObjectURL(blob)
@@ -645,7 +743,10 @@ function CodeSpaceShell({
         } catch {}
         if (!unmountingRef.current) {
           if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
-          reconnectTimerRef.current = setTimeout(() => connectRef.current(), 500)
+          reconnectTimerRef.current = setTimeout(
+            () => connectRef.current(),
+            500,
+          )
           return
         }
       }
@@ -669,7 +770,10 @@ function CodeSpaceShell({
         } catch {}
         if (!unmountingRef.current) {
           if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
-          reconnectTimerRef.current = setTimeout(() => connectRef.current(), 500)
+          reconnectTimerRef.current = setTimeout(
+            () => connectRef.current(),
+            500,
+          )
           return
         }
       }
@@ -710,7 +814,10 @@ function CodeSpaceShell({
     // Listen for transcript from WebSocket and auto-detect commands
     const trimmed = transcript.trim()
     if (trimmed && trimmed !== lastParsedTranscriptRef.current) {
-      if (skipNextAutoParseRef.current && skipNextAutoParseRef.current === trimmed) {
+      if (
+        skipNextAutoParseRef.current &&
+        skipNextAutoParseRef.current === trimmed
+      ) {
         lastParsedTranscriptRef.current = trimmed
         skipNextAutoParseRef.current = null
         // handled (explain yes/no)
@@ -741,9 +848,20 @@ function CodeSpaceShell({
       const path = autoCommandPayload?.path || 'untitled.py'
       const code = autoCommandPayload?.code || ''
       if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({type: 'write_file', path, code}))
-        pushMessage('leo', autoCommand === 'writeFile' ? '> Updating ' + path : '> Created ' + path)
-        pushLog(autoCommand === 'writeFile' ? '> Updating ' + path : '> Created ' + path)
+        socketRef.current.send(
+          JSON.stringify({ type: 'write_file', path, code }),
+        )
+        pushMessage(
+          'leo',
+          autoCommand === 'writeFile'
+            ? '> Updating ' + path
+            : '> Created ' + path,
+        )
+        pushLog(
+          autoCommand === 'writeFile'
+            ? '> Updating ' + path
+            : '> Created ' + path,
+        )
         setAutoCommand(null)
         setAutoCommandPayload(null)
       }
@@ -752,7 +870,7 @@ function CodeSpaceShell({
     if (autoCommand === 'createFolder') {
       const path = autoCommandPayload?.path || ''
       if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({type: 'mkdir', path}))
+        socketRef.current.send(JSON.stringify({ type: 'mkdir', path }))
         pushMessage('leo', '> Created folder ' + path)
         pushLog('> Created folder ' + path)
         setAutoCommand(null)
@@ -763,7 +881,7 @@ function CodeSpaceShell({
     if (autoCommand === 'editFile') {
       const path = autoCommandPayload?.path || ''
       if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({type: 'editFile', path}))
+        socketRef.current.send(JSON.stringify({ type: 'editFile', path }))
         pushMessage('leo', '> Opening ' + path)
         pushLog('> Opening ' + path)
         setAutoCommand(null)
@@ -774,7 +892,7 @@ function CodeSpaceShell({
     if (autoCommand === 'runFile') {
       const path = autoCommandPayload?.path || ''
       if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({type: 'run_script', path}))
+        socketRef.current.send(JSON.stringify({ type: 'run_script', path }))
         setAutoCommand(null)
         setAutoCommandPayload(null)
       }
@@ -830,14 +948,17 @@ function CodeSpaceShell({
   }
 
   const deleteEntry = async (path: string) => {
-    if (!window.confirm(`Delete ${baseName(path)}? This cannot be undone.`)) return
+    if (!window.confirm(`Delete ${baseName(path)}? This cannot be undone.`))
+      return
     try {
       setFiles(await removeWorkspacePath(path))
       setOffline(false)
       const remaining = tabs.filter((tab) => !isWithin(tab.path, path))
       setTabs(remaining)
       if (activeFile && isWithin(activeFile, path)) {
-        setActiveFile(remaining.length ? remaining[remaining.length - 1].path : null)
+        setActiveFile(
+          remaining.length ? remaining[remaining.length - 1].path : null,
+        )
       }
       pushLog(`> Deleted ${path}`)
     } catch (err) {
@@ -853,7 +974,9 @@ function CodeSpaceShell({
       setFiles(await writeWorkspaceFile(tab.path, tab.content))
       setOffline(false)
       setTabs((prev) =>
-        prev.map((item) => (item.path === tab.path ? { ...item, saved: item.content } : item)),
+        prev.map((item) =>
+          item.path === tab.path ? { ...item, saved: item.content } : item,
+        ),
       )
       pushLog(`> Saved ${tab.path}`)
       return true
@@ -878,7 +1001,11 @@ function CodeSpaceShell({
       const result = await runWorkspaceFile(target)
       setOffline(false)
       pushLog(result.output || '(no output)')
-      pushLog(result.ok ? `> Finished ${target}` : `ERROR: ${target} exited with an error`)
+      pushLog(
+        result.ok
+          ? `> Finished ${target}`
+          : `ERROR: ${target} exited with an error`,
+      )
     } catch (err) {
       pushLog(`ERROR: could not run ${target} — ${describeError(err)}`)
     } finally {
@@ -892,7 +1019,9 @@ function CodeSpaceShell({
     try {
       setFiles(await renameWorkspacePath(path, next))
       setOffline(false)
-      setTabs((prev) => prev.map((tab) => ({ ...tab, path: movePath(tab.path, path, next) })))
+      setTabs((prev) =>
+        prev.map((tab) => ({ ...tab, path: movePath(tab.path, path, next) })),
+      )
       setActiveFile((prev) => (prev ? movePath(prev, path, next) : prev))
       pushLog(`> Renamed ${path} to ${next}`)
     } catch (err) {
@@ -903,19 +1032,27 @@ function CodeSpaceShell({
   const updateContent = (code: string) => {
     if (!activeFile) return
     setTabs((prev) =>
-      prev.map((tab) => (tab.path === activeFile ? { ...tab, content: code } : tab)),
+      prev.map((tab) =>
+        tab.path === activeFile ? { ...tab, content: code } : tab,
+      ),
     )
   }
 
   const closeTab = (path: string) => {
     const tab = tabs.find((item) => item.path === path)
-    if (tab && tab.content !== tab.saved && !window.confirm(`Close ${baseName(path)} and discard changes?`)) {
+    if (
+      tab &&
+      tab.content !== tab.saved &&
+      !window.confirm(`Close ${baseName(path)} and discard changes?`)
+    ) {
       return
     }
     const remaining = tabs.filter((item) => item.path !== path)
     setTabs(remaining)
     if (activeFile === path) {
-      setActiveFile(remaining.length ? remaining[remaining.length - 1].path : null)
+      setActiveFile(
+        remaining.length ? remaining[remaining.length - 1].path : null,
+      )
     }
   }
 
@@ -962,7 +1099,11 @@ function CodeSpaceShell({
     } catch (err) {
       console.error('Microphone unavailable:', err)
       setLogs((prev) => [...prev, `ERROR: ${describeError(err)}`])
-      setVoiceStatus(socketRef.current?.readyState === WebSocket.OPEN ? 'ready' : 'disconnected')
+      setVoiceStatus(
+        socketRef.current?.readyState === WebSocket.OPEN
+          ? 'ready'
+          : 'disconnected',
+      )
       setSttStatus('error')
     } finally {
       setLoading(false)
@@ -982,7 +1123,10 @@ function CodeSpaceShell({
     try {
       const blob = await recorder.stop()
       if (blob.size === 0) {
-        setLogs((prev) => [...prev, 'ERROR: no audio captured — try speaking again'])
+        setLogs((prev) => [
+          ...prev,
+          'ERROR: no audio captured — try speaking again',
+        ])
         setVoiceStatus('ready')
         setSttStatus('error')
         return
@@ -1021,7 +1165,10 @@ function CodeSpaceShell({
       const kind = classifyExplanationResponse(text)
       if (kind === 'agree') {
         pushMessage('user', text)
-        pushMessage('leo', `Sure — I’ll explain ${baseName(pendingExplanationRef.current.path)} and its syntax.`)
+        pushMessage(
+          'leo',
+          `Sure — I’ll explain ${baseName(pendingExplanationRef.current.path)} and its syntax.`,
+        )
         void startExplanation(pendingExplanationRef.current)
         setCommandInput('')
         setPanelTab('voice')
@@ -1030,7 +1177,10 @@ function CodeSpaceShell({
       if (kind === 'decline') {
         pushMessage('user', text)
         setPendingExplanation(null)
-        pushMessage('leo', 'Okay, I’ll skip the explanation. Tell me what to do next.')
+        pushMessage(
+          'leo',
+          'Okay, I’ll skip the explanation. Tell me what to do next.',
+        )
         setCommandInput('')
         setPanelTab('voice')
         return
@@ -1043,7 +1193,10 @@ function CodeSpaceShell({
     const createFileRegex = /(create|new)\s+a?\s+file/i
     if (createFileRegex.test(text) && creationMode === 'none') {
       setCreationMode('ask')
-      pushMessage('leo', "I'd be happy to help you create a new file! What's the file path (e.g., `components/Leo.tsx`)? You can also say 'open folder' or 'clone a repo'.")
+      pushMessage(
+        'leo',
+        "I'd be happy to help you create a new file! What's the file path (e.g., `components/Leo.tsx`)? You can also say 'open folder' or 'clone a repo'.",
+      )
       setCommandInput('')
       return
     }
@@ -1053,7 +1206,10 @@ function CodeSpaceShell({
       const selectFolderRegex = /(select|choose)\s+a?\s+folder/i
       if (selectFolderRegex.test(text)) {
         setFolderSelectMode('ask')
-        pushMessage('leo', "I can list your folders. Please type the path of the folder you want (e.g., `components`).")
+        pushMessage(
+          'leo',
+          'I can list your folders. Please type the path of the folder you want (e.g., `components`).',
+        )
         setCommandInput('')
         return
       }
@@ -1064,7 +1220,9 @@ function CodeSpaceShell({
       if (path) {
         try {
           const entries = await listWorkspace()
-          const folder = entries.find((e) => e.kind === 'dir' && e.path === path)
+          const folder = entries.find(
+            (e) => e.kind === 'dir' && e.path === path,
+          )
           if (folder) {
             setActiveFile(path)
             setFolderSelectMode('chosen')
@@ -1072,7 +1230,9 @@ function CodeSpaceShell({
             pushLog(`> Selected folder ${path}`)
           } else {
             const match = entries.find(
-              (e) => e.kind === 'dir' && (e.path === path || e.path.startsWith(path + '/'))
+              (e) =>
+                e.kind === 'dir' &&
+                (e.path === path || e.path.startsWith(path + '/')),
             )
             if (match) {
               setActiveFile(match.path)
@@ -1082,17 +1242,23 @@ function CodeSpaceShell({
             } else {
               pushMessage(
                 'leo',
-                `I couldn't find a folder at "${path}". Type the full path or try a different name.`
+                `I couldn't find a folder at "${path}". Type the full path or try a different name.`,
               )
             }
           }
         } catch (err) {
-          pushMessage('leo', `ERROR: could not list folders — ${describeError(err)}`)
+          pushMessage(
+            'leo',
+            `ERROR: could not list folders — ${describeError(err)}`,
+          )
           pushLog(`ERROR: could not list folders — ${describeError(err)}`)
         }
         setFolderSelectMode('none')
       } else {
-        pushMessage('leo', "I didn't catch the folder path. Please type the path (e.g., `components`).")
+        pushMessage(
+          'leo',
+          "I didn't catch the folder path. Please type the path (e.g., `components`).",
+        )
       }
       setCommandInput('')
       return
@@ -1107,12 +1273,18 @@ function CodeSpaceShell({
           pushMessage('leo', `> Created ${path}`)
           pushLog(`> Created ${path}`)
         } catch (err) {
-          pushMessage('leo', `ERROR: could not create ${path} — ${describeError(err)}`)
+          pushMessage(
+            'leo',
+            `ERROR: could not create ${path} — ${describeError(err)}`,
+          )
           pushLog(`ERROR: could not create ${path} — ${describeError(err)}`)
         }
         setCreationMode('none')
       } else {
-        pushMessage('leo', "I didn't catch the path. Please tell me the file path (e.g., `components/Leo.tsx`).")
+        pushMessage(
+          'leo',
+          "I didn't catch the path. Please tell me the file path (e.g., `components/Leo.tsx`).",
+        )
       }
       setCommandInput('')
       return
@@ -1136,21 +1308,36 @@ function CodeSpaceShell({
       <header className="ide-titlebar flex items-center justify-between gap-3 px-3 h-10 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-5 h-5 rounded bg-[#635bff] flex items-center justify-center shrink-0">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M12 19v3" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
               <rect x="9" y="2" width="6" height="13" rx="3" />
             </svg>
           </div>
-          <span className="text-xs font-semibold tracking-tight truncate">Leo Voice Workspace</span>
+          <span className="text-xs font-semibold tracking-tight truncate">
+            Leo Voice Workspace
+          </span>
           <span className="hidden md:inline text-[11px] text-white/30 truncate max-w-56">
-            {activeFile || 'no file open'} · {fileCount} files{dirCount ? `, ${dirCount} folders` : ''}
+            {activeFile || 'no file open'} · {fileCount} files
+            {dirCount ? `, ${dirCount} folders` : ''}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
           {offline && (
-            <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30" title="Backend unreachable — the explorer is read-only">
+            <span
+              className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30"
+              title="Backend unreachable — the explorer is read-only"
+            >
               offline
             </span>
           )}
@@ -1167,9 +1354,20 @@ function CodeSpaceShell({
                 ? 'bg-red-500/20 text-red-300 border-red-500/40 hover:bg-red-500/30'
                 : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
             }`}
-            title={recording ? 'Stop and send the command' : 'Record a voice command'}
+            title={
+              recording ? 'Stop and send the command' : 'Record a voice command'
+            }
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
               <line x1="12" y1="19" x2="12" y2="23" />
@@ -1177,7 +1375,10 @@ function CodeSpaceShell({
             {recording ? 'Stop & send' : 'Speak'}
           </button>
           {user.email && (
-            <span className="hidden lg:inline text-[11px] text-white/40 truncate max-w-40" title={user.email}>
+            <span
+              className="hidden lg:inline text-[11px] text-white/40 truncate max-w-40"
+              title={user.email}
+            >
               {user.email}
             </span>
           )}
@@ -1185,7 +1386,10 @@ function CodeSpaceShell({
             <button
               onClick={async () => {
                 try {
-                  await fetch('/api/auth/signout', { method: 'POST', credentials: 'include' })
+                  await fetch('/api/auth/signout', {
+                    method: 'POST',
+                    credentials: 'include',
+                  })
                 } catch {
                   // The cookie may already be gone; leave the workspace anyway.
                 }
@@ -1232,13 +1436,20 @@ function CodeSpaceShell({
           {pendingExplanation && (
             <div className="mx-2 mt-2 rounded-lg border border-[#635bff]/35 bg-[#635bff]/10 px-3 py-2 text-xs text-white/85">
               <div className="font-medium text-white">
-                I’ve written <span className="font-mono">{baseName(pendingExplanation.path)}</span>. Should I explain the code and syntax line by line?
+                I’ve written{' '}
+                <span className="font-mono">
+                  {baseName(pendingExplanation.path)}
+                </span>
+                . Should I explain the code and syntax line by line?
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    pushMessage('leo', `Sure — I’ll explain ${baseName(pendingExplanation.path)} and its syntax.`)
+                    pushMessage(
+                      'leo',
+                      `Sure — I’ll explain ${baseName(pendingExplanation.path)} and its syntax.`,
+                    )
                     void startExplanation(pendingExplanation)
                   }}
                   className="rounded bg-[#635bff] px-2.5 py-1 text-xs font-medium text-white hover:bg-[#7c6cff]"
@@ -1249,13 +1460,18 @@ function CodeSpaceShell({
                   type="button"
                   onClick={() => {
                     setPendingExplanation(null)
-                    pushMessage('leo', 'Okay, I’ll skip the explanation. Tell me what to do next.')
+                    pushMessage(
+                      'leo',
+                      'Okay, I’ll skip the explanation. Tell me what to do next.',
+                    )
                   }}
                   className="rounded border border-white/15 bg-white/5 px-2.5 py-1 text-xs text-white/80 hover:bg-white/10"
                 >
                   No, continue
                 </button>
-                <span className="text-[11px] text-white/45">You can also answer by voice or type “yes” / “no”.</span>
+                <span className="text-[11px] text-white/45">
+                  You can also answer by voice or type “yes” / “no”.
+                </span>
               </div>
             </div>
           )}
@@ -1264,7 +1480,10 @@ function CodeSpaceShell({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-medium text-white/90">
-                    Code walkthrough: <span className="font-mono">{baseName(explanation.path)}</span>
+                    Code walkthrough:{' '}
+                    <span className="font-mono">
+                      {baseName(explanation.path)}
+                    </span>
                   </div>
                   <div className="text-[11px] text-white/45">
                     {explanation.loading
@@ -1280,15 +1499,37 @@ function CodeSpaceShell({
                   <button
                     type="button"
                     disabled={explanation.loading || explanation.index <= 0}
-                    onClick={() => setExplanation((prev) => prev && ({ ...prev, index: Math.max(0, prev.index - 1) }))}
+                    onClick={() =>
+                      setExplanation(
+                        (prev) =>
+                          prev && {
+                            ...prev,
+                            index: Math.max(0, prev.index - 1),
+                          },
+                      )
+                    }
                     className="rounded border border-white/10 px-2 py-1 text-white/70 disabled:opacity-40 hover:bg-white/5"
                   >
                     Prev
                   </button>
                   <button
                     type="button"
-                    disabled={explanation.loading || explanation.index >= explanation.steps.length - 1}
-                    onClick={() => setExplanation((prev) => prev && ({ ...prev, index: Math.min(prev.steps.length - 1, prev.index + 1) }))}
+                    disabled={
+                      explanation.loading ||
+                      explanation.index >= explanation.steps.length - 1
+                    }
+                    onClick={() =>
+                      setExplanation(
+                        (prev) =>
+                          prev && {
+                            ...prev,
+                            index: Math.min(
+                              prev.steps.length - 1,
+                              prev.index + 1,
+                            ),
+                          },
+                      )
+                    }
                     className="rounded border border-white/10 px-2 py-1 text-white/70 disabled:opacity-40 hover:bg-white/5"
                   >
                     Next
@@ -1306,14 +1547,27 @@ function CodeSpaceShell({
               {explanation.error ? (
                 <div className="mt-2 text-red-300/90">{explanation.error}</div>
               ) : explanation.loading ? (
-                <div className="mt-2 text-white/55">Leo is analyzing the code and syntax…</div>
+                <div className="mt-2 text-white/55">
+                  Leo is analyzing the code and syntax…
+                </div>
               ) : explanation.steps[explanation.index] ? (
                 <div className="mt-2 space-y-1.5 text-white/75">
-                  <div className="font-medium text-[#c9c4ff]">{explanation.steps[explanation.index].title}</div>
-                  <div><span className="text-white/45">What it does:</span> {explanation.steps[explanation.index].what}</div>
-                  <div><span className="text-white/45">Why we wrote it:</span> {explanation.steps[explanation.index].why}</div>
+                  <div className="font-medium text-[#c9c4ff]">
+                    {explanation.steps[explanation.index].title}
+                  </div>
+                  <div>
+                    <span className="text-white/45">What it does:</span>{' '}
+                    {explanation.steps[explanation.index].what}
+                  </div>
+                  <div>
+                    <span className="text-white/45">Why we wrote it:</span>{' '}
+                    {explanation.steps[explanation.index].why}
+                  </div>
                   {!!explanation.steps[explanation.index].syntax?.length && (
-                    <div><span className="text-white/45">Syntax/concepts:</span> {explanation.steps[explanation.index].syntax?.join(', ')}</div>
+                    <div>
+                      <span className="text-white/45">Syntax/concepts:</span>{' '}
+                      {explanation.steps[explanation.index].syntax?.join(', ')}
+                    </div>
                   )}
                 </div>
               ) : null}
@@ -1328,8 +1582,19 @@ function CodeSpaceShell({
             onRun={() => void runFile()}
             onExplain={() => {
               if (!activeFile || !activeContent.trim()) return
-              const language = activeFile.endsWith('.py') ? 'python' : activeFile.endsWith('.ts') || activeFile.endsWith('.tsx') ? 'typescript' : activeFile.endsWith('.js') || activeFile.endsWith('.jsx') ? 'javascript' : 'code'
-              void startExplanation({ path: activeFile, code: activeContent, language, goal: lastUserGoalRef.current || '' })
+              const language = activeFile.endsWith('.py')
+                ? 'python'
+                : activeFile.endsWith('.ts') || activeFile.endsWith('.tsx')
+                  ? 'typescript'
+                  : activeFile.endsWith('.js') || activeFile.endsWith('.jsx')
+                    ? 'javascript'
+                    : 'code'
+              void startExplanation({
+                path: activeFile,
+                code: activeContent,
+                language,
+                goal: lastUserGoalRef.current || '',
+              })
             }}
             onTabClick={(path) => void openFile(path)}
             onTabClose={closeTab}
@@ -1353,17 +1618,22 @@ function CodeSpaceShell({
                 </div>
                 <div className="flex-1 min-h-0 overflow-y-auto font-mono text-xs space-y-0.5">
                   {transcript && (
-                    <div className="text-[#8b83ff] whitespace-pre-wrap">&gt; {transcript}</div>
+                    <div className="text-[#8b83ff] whitespace-pre-wrap">
+                      &gt; {transcript}
+                    </div>
                   )}
                   {logs.map((log, i) => (
-                    <div key={i} className="text-white/60 leading-relaxed whitespace-pre-wrap">
+                    <div
+                      key={i}
+                      className="text-white/60 leading-relaxed whitespace-pre-wrap"
+                    >
                       {log}
                     </div>
                   ))}
                   {!logs.length && !transcript && (
                     <div className="text-white/25">
-                      Press Speak, say a command, then press Stop &amp; send. Agent output and
-                      errors appear here.
+                      Press Speak, say a command, then press Stop &amp; send.
+                      Agent output and errors appear here.
                     </div>
                   )}
                 </div>
@@ -1371,30 +1641,48 @@ function CodeSpaceShell({
             )}
 
             {panelTab === 'terminal' && (
-              <div className="flex flex-col h-full min-h-0 font-mono text-xs" tabIndex={0} onKeyDown={(e) => {
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault()
-                  setActiveLog((prev) => prev > 0 ? prev - 1 : logs.length - 1)
-                }
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault()
-                  setActiveLog((prev) => prev < logs.length - 1 ? prev + 1 : 0)
-                }
-              }}
+              <div
+                className="flex flex-col h-full min-h-0 font-mono text-xs"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setActiveLog((prev) =>
+                      prev > 0 ? prev - 1 : logs.length - 1,
+                    )
+                  }
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setActiveLog((prev) =>
+                      prev < logs.length - 1 ? prev + 1 : 0,
+                    )
+                  }
+                }}
               >
-                <div className="text-white/40 shrink-0">Leo sandbox terminal</div>
-                <div className="flex-1 min-h-0 overflow-y-auto text-white/55 space-y-0.5 mt-1" role="dialog" aria-label="Terminal log">
+                <div className="text-white/40 shrink-0">
+                  Leo sandbox terminal
+                </div>
+                <div
+                  className="flex-1 min-h-0 overflow-y-auto text-white/55 space-y-0.5 mt-1"
+                  role="dialog"
+                  aria-label="Terminal log"
+                >
                   {logs.map((log, i) => (
-                    <div key={i} className={
-                      i === activeLog
-                        ? 'whitespace-pre-wrap bg-[#635bff]/20'
-                        : 'whitespace-pre-wrap'
-                    }>
+                    <div
+                      key={i}
+                      className={
+                        i === activeLog
+                          ? 'whitespace-pre-wrap bg-[#635bff]/20'
+                          : 'whitespace-pre-wrap'
+                      }
+                    >
                       {log}
                     </div>
                   ))}
                   {!logs.length && (
-                    <div className="text-white/25">$ Run a file to see its output here.</div>
+                    <div className="text-white/25">
+                      $ Run a file to see its output here.
+                    </div>
                   )}
                 </div>
               </div>
@@ -1421,8 +1709,9 @@ function CodeSpaceShell({
                 <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
                   {messages.length === 0 && (
                     <p className="text-xs text-white/25">
-                      Talk to Leo: press Speak, say something, then Stop &amp; send.
-                      You can also type below if the microphone is unavailable.
+                      Talk to Leo: press Speak, say something, then Stop &amp;
+                      send. You can also type below if the microphone is
+                      unavailable.
                     </p>
                   )}
                   {messages.map((message) => (
@@ -1563,10 +1852,20 @@ const VOICE_STATUS_LABELS = {
 function VoiceStatusBar({
   voiceStatus,
   className,
-}: { voiceStatus: keyof typeof VOICE_STATUS_LABELS; className?: string }) {
+}: {
+  voiceStatus: keyof typeof VOICE_STATUS_LABELS
+  className?: string
+}) {
   return (
-    <div className={`p-2 bg-gray-900 text-white rounded mb-2 flex items-center gap-2 ${className || ''}`}>
-      <svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div
+      className={`p-2 bg-gray-900 text-white rounded mb-2 flex items-center gap-2 ${className || ''}`}
+    >
+      <svg
+        className="w-3 h-3 text-green-500"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
         <path
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -1591,7 +1890,11 @@ function PipelineVisualizer({
 }) {
   const stages = [
     { label: 'STT', active: sttStatus === 'listening', color: 'bg-blue-500' },
-    { label: 'Agent', active: agentStatus === 'processing', color: 'bg-amber-500' },
+    {
+      label: 'Agent',
+      active: agentStatus === 'processing',
+      color: 'bg-amber-500',
+    },
     { label: 'TTS', active: ttsStatus === 'speaking', color: 'bg-emerald-500' },
   ]
 
@@ -1614,10 +1917,18 @@ function CommandHints() {
     <div className="p-2 bg-gray-900 text-xs text-gray-300 rounded mb-2 uppercase">
       <p className="text-xs mb-1 text-gray-400">Shortcuts</p>
       <div className="flex gap-1">
-        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Cmd+K</kbd>
-        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Esc</kbd>
-        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Ctrl+Enter</kbd>
-        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">Ctrl+J</kbd>
+        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">
+          Cmd+K
+        </kbd>
+        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">
+          Esc
+        </kbd>
+        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">
+          Ctrl+Enter
+        </kbd>
+        <kbd className="bg-white/10 px-2 py-1 rounded text-xs text-gray-300">
+          Ctrl+J
+        </kbd>
       </div>
     </div>
   )
@@ -1676,8 +1987,12 @@ function CommandPalette({
             >
               <span className="w-1.5 h-1.5 bg-[#635bff] rounded-full shrink-0" />
               <span className="min-w-0">
-                <span className="block font-medium text-white text-sm">{command.label}</span>
-                <span className="block text-xs text-white/40">{command.description}</span>
+                <span className="block font-medium text-white text-sm">
+                  {command.label}
+                </span>
+                <span className="block text-xs text-white/40">
+                  {command.description}
+                </span>
               </span>
             </button>
           ))}
@@ -1696,15 +2011,18 @@ function ContextAwarePrompting({ onClose }: { onClose: () => void }) {
   const contexts = [
     {
       trigger: 'file-viewed',
-      message: "I see you're viewing a React component. Would you like me to help extract props or generate unit tests?",
+      message:
+        "I see you're viewing a React component. Would you like me to help extract props or generate unit tests?",
     },
     {
       trigger: 'recent-actions',
-      message: 'You just saved a file. Would you like to commit changes or preview the updated component?',
+      message:
+        'You just saved a file. Would you like to commit changes or preview the updated component?',
     },
     {
       trigger: 'selection',
-      message: 'Code is selected. I can help refactor, extract function, or generate documentation for this block.',
+      message:
+        'Code is selected. I can help refactor, extract function, or generate documentation for this block.',
     },
   ]
 
@@ -1722,7 +2040,9 @@ function ContextAwarePrompting({ onClose }: { onClose: () => void }) {
           ×
         </button>
       </div>
-      <p className="px-3 py-2 text-xs leading-relaxed text-white/60">{prompt || contexts[0].message}</p>
+      <p className="px-3 py-2 text-xs leading-relaxed text-white/60">
+        {prompt || contexts[0].message}
+      </p>
       <div className="flex flex-wrap gap-1.5 border-t border-white/5 px-3 py-2">
         {contexts.map((c) => (
           <button

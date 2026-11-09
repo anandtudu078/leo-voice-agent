@@ -1,6 +1,12 @@
 'use client'
 
-import React, { useState, useEffect, createContext, useContext, ReactNode } from 'react'
+import React, {
+  useState,
+  useEffect,
+  createContext,
+  useContext,
+  ReactNode,
+} from 'react'
 
 interface AuthSession {
   user: { email: string }
@@ -67,11 +73,15 @@ function Providers({ children }: { children: ReactNode }) {
       }
       const detail =
         data.detail ||
-        (res.ok ? 'Sign-in failed: unexpected response.' : `Sign-in failed (HTTP ${res.status}).`)
+        (res.ok
+          ? 'Sign-in failed: unexpected response.'
+          : `Sign-in failed (HTTP ${res.status}).`)
       window.alert(detail)
       return false
     } catch (err) {
-      window.alert(`Network error. Please try again.${err instanceof Error ? ` (${err.message})` : ''}`)
+      window.alert(
+        `Network error. Please try again.${err instanceof Error ? ` (${err.message})` : ''}`,
+      )
       return false
     }
   }
@@ -83,11 +93,19 @@ function Providers({ children }: { children: ReactNode }) {
   }
 
   if (!ready) {
-    return <AuthContext.Provider value={{ session: null, loggedIn: false, signIn, signOut }}>{children}</AuthContext.Provider>
+    return (
+      <AuthContext.Provider
+        value={{ session: null, loggedIn: false, signIn, signOut }}
+      >
+        {children}
+      </AuthContext.Provider>
+    )
   }
 
   return (
-    <AuthContext.Provider value={{ session, loggedIn: session !== null, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{ session, loggedIn: session !== null, signIn, signOut }}
+    >
       {children}
     </AuthContext.Provider>
   )

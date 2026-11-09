@@ -30,7 +30,10 @@ export function VoiceStatus({ voiceStatus }: VoiceStatusProps) {
         className="w-1.5 h-1.5 rounded-full"
         style={{
           backgroundColor: color,
-          boxShadow: voiceStatus === 'listening' || voiceStatus === 'processing' ? `0 0 8px ${color}` : 'none',
+          boxShadow:
+            voiceStatus === 'listening' || voiceStatus === 'processing'
+              ? `0 0 8px ${color}`
+              : 'none',
         }}
       />
       <span className="text-xs font-medium text-white">{label}</span>

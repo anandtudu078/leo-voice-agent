@@ -1,28 +1,28 @@
-import { useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { LogIn, UserPlus } from "lucide-react";
+import { useState } from 'react'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { LogIn, UserPlus } from 'lucide-react'
 
 export default function SignupPage({
   onSignup,
   setAuth,
 }: {
-  onSignup: (email: string) => void;
-  setAuth: (value: "logging-in" | "logged-in" | "logged-out") => void;
+  onSignup: (email: string) => void
+  setAuth: (value: 'logging-in' | 'logged-in' | 'logged-out') => void
 }) {
-  const [email, setEmail] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+    e.preventDefault()
+    setError(null)
     if (!email.trim()) {
-      setError("Email is required");
-      return;
+      setError('Email is required')
+      return
     }
-    onSignup(email.trim());
-    setAuth("logging-in");
-  };
+    onSignup(email.trim())
+    setAuth('logging-in')
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -51,14 +51,14 @@ export default function SignupPage({
             required
           />
           <Button type="submit" disabled={error ? true : false}>
-            {error ? "Try again" : "Sign Up"}
+            {error ? 'Try again' : 'Sign Up'}
           </Button>
         </form>
 
         <p className="text-sm text-muted-foreground">
-          Already have an account?{" "}
+          Already have an account?{' '}
           <button
-            onClick={() => setAuth("logged-out")}
+            onClick={() => setAuth('logged-out')}
             className="underline underline-offset-2 hover:text-primary"
           >
             Sign in
@@ -66,5 +66,5 @@ export default function SignupPage({
         </p>
       </div>
     </div>
-  );
+  )
 }

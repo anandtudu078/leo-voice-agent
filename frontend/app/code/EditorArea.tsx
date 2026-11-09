@@ -59,7 +59,9 @@ export function EditorArea({
     const pane = paneRef.current
     const viewTop = pane.scrollTop
     const viewBottom = viewTop + pane.clientHeight
-    const targetBottom = top + (explainRange.endLine - explainRange.startLine + 1) * EDITOR_LINE_HEIGHT
+    const targetBottom =
+      top +
+      (explainRange.endLine - explainRange.startLine + 1) * EDITOR_LINE_HEIGHT
     if (top < viewTop + 24 || targetBottom > viewBottom - 24) {
       pane.scrollTo({ top: Math.max(0, top - 48), behavior: 'smooth' })
     }
@@ -88,13 +90,26 @@ export function EditorArea({
                 onClick={() => onTabClick(tab.path)}
                 title={tab.path}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1 shrink-0">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="mr-1 shrink-0"
+                >
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                   <path d="M14 2v6h6" />
                 </svg>
                 <span className="truncate max-w-40">{tab.label}</span>
                 {tab.dirty && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#635bff] shrink-0" title="Unsaved changes" />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-[#635bff] shrink-0"
+                    title="Unsaved changes"
+                  />
                 )}
                 <button
                   onClick={(e) => {
@@ -118,7 +133,11 @@ export function EditorArea({
 
         <div className="ide-tabbar-actions">
           <span className="text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded bg-white/5 text-white/40">
-            {running ? 'RUNNING' : language === 'text' ? 'EDIT' : language.toUpperCase()}
+            {running
+              ? 'RUNNING'
+              : language === 'text'
+                ? 'EDIT'
+                : language.toUpperCase()}
           </span>
           <button
             onClick={onSave}
@@ -155,9 +174,15 @@ export function EditorArea({
           <div className="ide-line-numbers" aria-hidden="true">
             {lines.map((_, i) => {
               const n = i + 1
-              const active = !!explainRange && n >= explainRange.startLine && n <= explainRange.endLine
+              const active =
+                !!explainRange &&
+                n >= explainRange.startLine &&
+                n <= explainRange.endLine
               return (
-                <div key={i} className={active ? 'ide-line-explain-active' : undefined}>
+                <div
+                  key={i}
+                  className={active ? 'ide-line-explain-active' : undefined}
+                >
                   {n}
                 </div>
               )
@@ -170,7 +195,9 @@ export function EditorArea({
                 className="ide-explain-highlight pointer-events-none absolute left-0 right-0"
                 style={{
                   top: 12 + (explainRange.startLine - 1) * EDITOR_LINE_HEIGHT,
-                  height: (explainRange.endLine - explainRange.startLine + 1) * EDITOR_LINE_HEIGHT,
+                  height:
+                    (explainRange.endLine - explainRange.startLine + 1) *
+                    EDITOR_LINE_HEIGHT,
                 }}
               />
             )}
@@ -216,12 +243,23 @@ export function EditorArea({
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-white/30">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="40"
+            height="40"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <path d="M14 2v6h6" />
           </svg>
           <p className="text-sm">No file open</p>
-          <p className="text-xs">Pick a file in the Explorer, or speak a command.</p>
+          <p className="text-xs">
+            Pick a file in the Explorer, or speak a command.
+          </p>
         </div>
       )}
     </div>

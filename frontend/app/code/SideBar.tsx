@@ -36,7 +36,9 @@ function buildTree(entries: WorkspaceEntry[]): TreeNode[] {
   const map = new Map<string, TreeNode>()
   const roots: TreeNode[] = []
 
-  for (const entry of [...entries].sort((a, b) => a.path.localeCompare(b.path))) {
+  for (const entry of [...entries].sort((a, b) =>
+    a.path.localeCompare(b.path),
+  )) {
     const node: TreeNode = { ...entry, children: [] }
     map.set(entry.path, node)
     const slash = entry.path.lastIndexOf('/')
@@ -77,7 +79,17 @@ function IconChevron({ open }: { open: boolean }) {
 
 function IconFolder() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
       <path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" />
     </svg>
   )
@@ -85,7 +97,17 @@ function IconFolder() {
 
 function IconFile() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
       <path d="M14 2v6h6" />
     </svg>
@@ -94,7 +116,16 @@ function IconFile() {
 
 function IconPlus() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 5v14M5 12h14" />
     </svg>
   )
@@ -102,7 +133,16 @@ function IconPlus() {
 
 function IconFolderPlus() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" />
       <path d="M12 11v6M9 14h6" />
     </svg>
@@ -111,7 +151,16 @@ function IconFolderPlus() {
 
 function IconRefresh() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M3 12a9 9 0 0 1 15.5-6.4L21 8" />
       <path d="M21 3v5h-5" />
       <path d="M21 12a9 9 0 0 1-15.5 6.4L3 16" />
@@ -145,13 +194,18 @@ export function SideBar({
   const isSearch = view === 'search'
 
   const toggleDir = (path: string) =>
-    setCollapsed((prev) => (prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path]))
+    setCollapsed((prev) =>
+      prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path],
+    )
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return []
     return files
-      .filter((entry) => entry.kind === 'file' && entry.path.toLowerCase().includes(q))
+      .filter(
+        (entry) =>
+          entry.kind === 'file' && entry.path.toLowerCase().includes(q),
+      )
       .sort((a, b) => a.path.localeCompare(b.path))
   }, [files, query])
 
@@ -179,11 +233,16 @@ export function SideBar({
           <span className={isDir ? 'text-[#dcb67a]' : 'text-white/45'}>
             {isDir ? <IconFolder /> : <IconFile />}
           </span>
-          <span className={`truncate flex-1 text-[13px] ${isActive ? 'text-white' : 'text-white/75'}`}>
+          <span
+            className={`truncate flex-1 text-[13px] ${isActive ? 'text-white' : 'text-white/75'}`}
+          >
             {node.name}
           </span>
           {!isDir && dirty.has(node.path) && (
-            <span className="w-1.5 h-1.5 rounded-full bg-[#635bff] shrink-0" title="Unsaved changes" />
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-[#635bff] shrink-0"
+              title="Unsaved changes"
+            />
           )}
           <span className="ide-tree-actions flex items-center gap-0.5">
             <button
@@ -195,7 +254,16 @@ export function SideBar({
               title={`Rename ${node.name}`}
               aria-label={`Rename ${node.name}`}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M12 20h9" />
                 <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
               </svg>
@@ -209,7 +277,16 @@ export function SideBar({
               title={`Delete ${node.name}`}
               aria-label={`Delete ${node.name}`}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M3 6h18" />
                 <path d="M8 6V4h8v2" />
                 <path d="M19 6l-1 14H6L5 6" />
@@ -217,7 +294,9 @@ export function SideBar({
             </button>
           </span>
         </div>
-        {isDir && isOpen && node.children.map((child) => renderNode(child, depth + 1))}
+        {isDir &&
+          isOpen &&
+          node.children.map((child) => renderNode(child, depth + 1))}
       </div>
     )
   }
@@ -232,7 +311,16 @@ export function SideBar({
           aria-label="Collapse sidebar"
           title="Collapse sidebar"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
@@ -283,7 +371,9 @@ export function SideBar({
 
           <div className="ide-section-body flex-1 py-1">
             {loading && files.length === 0 && (
-              <div className="text-xs text-white/35 p-2">Loading workspace…</div>
+              <div className="text-xs text-white/35 p-2">
+                Loading workspace…
+              </div>
             )}
 
             {!loading && files.length === 0 && (
@@ -320,7 +410,9 @@ export function SideBar({
                     <span className="text-white/45">
                       <IconFile />
                     </span>
-                    <span className="truncate flex-1 text-[13px] text-white/75">{entry.path}</span>
+                    <span className="truncate flex-1 text-[13px] text-white/75">
+                      {entry.path}
+                    </span>
                   </div>
                 ))}
               </div>
