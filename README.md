@@ -196,7 +196,11 @@ npm run dev
 | Variable           | Purpose                              |
 |--------------------|--------------------------------------|
 | `GNANI_API_KEY`    | Gnani API key for STT/TTS calls      |
+| `GNANI_TTS_MODEL`  | TTS model (default `timbre-v2.5`)    |
+| `GNANI_TTS_VOICE`  | TTS voice (default `Kaveri`)         |
+| `GNANI_TTS_LANGUAGE` | TTS language (default `en-IN`)      |
 | `GEMINI_API_KEY`   | Google Gemini API key                |
+| `GEMINI_MODEL`     | Gemini model (default `gemini-3.1-flash-lite`) |
 | `DATABASE_URL`     | Postgres URL (Neon); falls back to local SQLite at `.data/leo.db` when unset |
 | `LEO_SESSION_SECRET` | Secret used to sign session cookies |
 | `LEO_WORKSPACE_ROOT` | Directory holding per-user workspaces (default `session`) |
@@ -241,6 +245,19 @@ Deploy a branch that contains this config (the `main` branch may lag behind),
 then set `DATABASE_URL` to your Postgres URL. Without it the service starts on
 SQLite, which is wiped on every deploy. The `uvicorn[standard]` extra is
 required for the `/ws/*` endpoints.
+
+### Keeping the backend awake
+
+Render's free web services sleep after a period without traffic, which makes the
+first request slow and leaves the IDE showing "offline" until it wakes. The
+`.github/workflows/keep-backend-awake.yml` workflow pings `/api/health` every
+ten minutes to keep it warm. It targets
+`https://leo-voice-agent-backend.onrender.com/api/health` by default; set a
+repository variable `BACKEND_HEALTH_URL` to point it at another deployment.
+
+For a backend that is always active without a keep-alive, upgrade the Render
+service to a paid instance type. The IDE also probes `/api/health` every ten
+seconds while it is open and reconnects by itself after a restart.
 
 ## Smoke test
 

@@ -12,6 +12,7 @@ import { languageLabel } from '@/lib/highlight'
 import { WavRecorder } from '@/lib/audio'
 import {
   baseName,
+  checkBackendHealth,
   listWorkspace,
   makeWorkspaceDir,
   readWorkspaceFile,
@@ -143,6 +144,19 @@ function CodeSpaceShell({
   const [showSuggestion, setShowSuggestion] = useState(true)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
+  const [messages, setMessages] = useState<{ id: number; role: 'user' | 'leo'; text: string }[]>([])
+  const [commandInput, setCommandInput] = useState('')
+
+  const messageIdRef = useRef(0)
+  const offlineRef = useRef(false)
+  const unmountingRef = useRef(false)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const connectRef = useRef<() => void>(() => {})
+
+  const pushMessage = useCallback((role: 'user' | 'leo', text: string) => {
+    if (!text) return
+    setMessages((prev) => [...prev.slice(-59), { id: ++messageIdRef.current, role, text }])
+  }, [])
 
   const blobToDataUrl = (blob: Blob) =>
     new Promise<string>((resolve, reject) => {
@@ -196,10 +210,15 @@ function CodeSpaceShell({
   const refreshTree = useCallback(async () => {
     try {
       setFiles(await listWorkspace())
+      if (offlineRef.current) pushLog('> Backend reconnected — workspace reloaded')
+      offlineRef.current = false
       setOffline(false)
     } catch (err) {
+      if (!offlineRef.current) {
+        pushLog(`ERROR: could not load the workspace — ${describeError(err)}`)
+      }
+      offlineRef.current = true
       setOffline(true)
-      pushLog(`ERROR: could not load the workspace — ${describeError(err)}`)
     }
   }, [pushLog])
 
@@ -209,10 +228,12 @@ function CodeSpaceShell({
       .then((entries) => {
         if (cancelled) return
         setFiles(entries)
+        offlineRef.current = false
         setOffline(false)
       })
       .catch((err) => {
         if (cancelled) return
+        offlineRef.current = true
         setOffline(true)
         pushLog(`ERROR: could not load the workspace — ${describeError(err)}`)
       })
@@ -279,6 +300,7 @@ function CodeSpaceShell({
             break
           case 'transcript':
             setTranscript(msg.transcript || '')
+            pushMessage('user', msg.transcript || '')
             setVoiceStatus('ready')
             setSttStatus('idle')
             break
@@ -297,6 +319,7 @@ function CodeSpaceShell({
             break
           case 'speech':
             setLogs((prev) => [...prev, `{ Agent says: ${msg.text || '<reply>'} }`])
+            pushMessage('leo', msg.text || '')
             setVoiceStatus('ready')
             setAgentStatus('done')
             try {
@@ -353,6 +376,11 @@ function CodeSpaceShell({
 
     ws.onclose = () => {
       setVoiceStatus('idle')
+      // Reconnect on our own so a backend restart does not end the session.
+      if (!unmountingRef.current) {
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = setTimeout(() => connectRef.current(), 3000)
+      }
     }
 
     ws.onerror = () => {
@@ -360,16 +388,33 @@ function CodeSpaceShell({
     }
     // State setters are stable, so this effect connects once instead of
     // reconnecting every time the voice status or transcript changes.
-  }, [setVoiceStatus, setSttStatus, setAgentStatus, setTtsStatus])
+  }, [pushMessage, setVoiceStatus, setSttStatus, setAgentStatus, setTtsStatus])
+
+  connectRef.current = connect
 
   useEffect(() => {
     connect()
     return () => {
+      unmountingRef.current = true
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
       socketRef.current?.close()
       void recorderRef.current?.stop()
       recorderRef.current = null
     }
   }, [connect])
+
+  // Keep the backend warm and recover automatically after a restart: when the
+  // health probe answers, refresh the tree and reopen the voice socket.
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      if (!(await checkBackendHealth())) return
+      void refreshTree()
+      if (!socketRef.current || socketRef.current.readyState > WebSocket.OPEN) {
+        connectRef.current()
+      }
+    }, 10000)
+    return () => clearInterval(timer)
+  }, [refreshTree])
   // ---- File operations (HTTP workspace API) ----
   const openFile = async (path: string) => {
     if (tabs.some((tab) => tab.path === path)) {
@@ -599,6 +644,19 @@ function CodeSpaceShell({
     else void startRecording()
   }
 
+  const sendTextCommand = () => {
+    const text = commandInput.trim()
+    if (!text) return
+    if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      pushLog('ERROR: voice socket is not connected — retrying in a moment')
+      connectRef.current()
+      return
+    }
+    socketRef.current.send(JSON.stringify({ type: 'text', text }))
+    setCommandInput('')
+    setPanelTab('voice')
+  }
+
   const fileCount = files.filter((entry) => entry.kind === 'file').length
   const dirCount = files.filter((entry) => entry.kind === 'dir').length
   return (
@@ -769,31 +827,66 @@ function CodeSpaceShell({
             )}
 
             {panelTab === 'voice' && (
-              <div className="h-full space-y-3">
-                <div>
-                  <div className="text-[11px] text-white/35 mb-1 font-semibold uppercase tracking-wider">
-                    Voice state
-                  </div>
+              <div className="flex h-full min-h-0 flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-3 shrink-0">
                   <VoiceStatus voiceStatus={voiceStatus} />
-                </div>
-                <div>
-                  <div className="text-[11px] text-white/35 mb-1 font-semibold uppercase tracking-wider">
-                    Pipeline
-                  </div>
                   <PipelineVisualizer
                     sttStatus={sttStatus}
                     agentStatus={agentStatus}
                     ttsStatus={ttsStatus}
                   />
                 </div>
-                <div>
-                  <div className="text-[11px] text-white/35 mb-1 font-semibold uppercase tracking-wider">
-                    Last transcript
-                  </div>
-                  <div className="text-xs text-white/60 whitespace-pre-wrap">
-                    {transcript || 'Nothing heard yet.'}
-                  </div>
+
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+                  {messages.length === 0 && (
+                    <p className="text-xs text-white/25">
+                      Talk to Leo: press Speak, say something, then Stop &amp; send.
+                      You can also type below if the microphone is unavailable.
+                    </p>
+                  )}
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs whitespace-pre-wrap ${
+                          message.role === 'user'
+                            ? 'bg-[#635bff]/20 text-white/85'
+                            : 'bg-white/[0.06] text-white/70'
+                        }`}
+                      >
+                        <div className="mb-0.5 text-[9px] uppercase tracking-wider opacity-45">
+                          {message.role === 'user' ? 'You' : 'Leo'}
+                        </div>
+                        {message.text}
+                      </div>
+                    </div>
+                  ))}
                 </div>
+
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    sendTextCommand()
+                  }}
+                  className="flex shrink-0 items-center gap-2"
+                >
+                  <input
+                    value={commandInput}
+                    onChange={(event) => setCommandInput(event.target.value)}
+                    placeholder="Type a message for Leo…"
+                    aria-label="Message Leo"
+                    className="flex-1 rounded-md border border-white/10 bg-black/25 px-2.5 py-1.5 text-xs text-white placeholder:text-white/25 focus:border-[#635bff] focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!commandInput.trim()}
+                    className="rounded-md bg-[#635bff] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#7c6cff] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                </form>
               </div>
             )}
           </Panel>
@@ -810,7 +903,9 @@ function CodeSpaceShell({
         onVoiceToggle={toggleRecording}
       />
 
-      {showSuggestion && <ContextAwarePrompting onClose={() => setShowSuggestion(false)} />}
+      {showSuggestion && panelTab !== 'voice' && (
+        <ContextAwarePrompting onClose={() => setShowSuggestion(false)} />
+      )}
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
