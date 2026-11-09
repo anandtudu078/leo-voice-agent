@@ -253,7 +253,7 @@ function CodeSpaceShell({
   // ---- WebSocket connection ----
   const connect = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN) return
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+    const backendUrl = process.env.NEXT_BACKEND_URL || 'http://localhost:8000'
     const wsUrl = `${backendUrl.replace(/^http/, 'ws')}/ws/process-voice`
     const ws = new WebSocket(wsUrl)
     socketRef.current = ws
