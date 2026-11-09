@@ -505,7 +505,7 @@ async def websocket_process_voice(websocket: WebSocket):
     async def handle_audio(audio: bytes) -> None:
         try:
             transcript = await asyncio.to_thread(
-                stt_client.transcribe, audio, "microphone.webm", "audio/webm"
+                stt_client.transcribe, audio, "microphone.wav", "audio/wav"
             )
         except GnaniSTTError as exc:
             await websocket.send_json({"type": "error", "error": str(exc)})
@@ -824,7 +824,7 @@ async def websocket_talk(websocket: WebSocket):
         if pending_audio:
             try:
                 transcript = stt_client.transcribe(
-                    b"".join(pending_audio), "microphone.wav", "audio/webm"
+                    b"".join(pending_audio), "microphone.wav", "audio/wav"
                 )
                 if transcript:
                     await websocket.send_json({"type": "transcript", "text": transcript})
