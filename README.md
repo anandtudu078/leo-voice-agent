@@ -105,7 +105,7 @@ This feature is designed to help users learn the language, syntax, and programmi
    - **Another command** (for example, `run it`, `create app.js`) — the explanation prompt is cancelled and Leo continues with that command.
 4. **Walkthrough UI:** the editor highlights the current line range, auto-scrolls to it, and shows **What it does**, **Why we wrote it**, and **Syntax/concepts**. You can use **Prev/Next/Close** or the editor **Explain** button to review code again.
 
-**API:** `POST /api/explain-code` accepts `{ path, code?, language?, goal? }` and returns structured steps (`startLine`, `endLine`, `title`, `what`, `why`, `syntax`). When `GEMINI_API_KEY` is configured, Leo uses Gemini to generate explanations; if Gemini is unavailable or returns unusable output, the backend falls back to a deterministic line-based explainer. v1 is text-only (no TTS narration yet).
+**API:** `POST /api/explain-code` accepts `{ path, code?, language?, goal? }` and returns structured steps (`startLine`, `endLine`, `title`, `what`, `why`, `syntax`, plus `provider`). Leo tries the configured primary LLM (`GEMINI` by default) and falls back to `GROQ` on retryable errors (rate limits/quota, timeouts, 5xx/overloaded) or when the primary provider is unavailable; if LLM output is unusable or no provider succeeds, it falls back to a deterministic line-based explainer (`provider: fallback`). v1 is text-only (no TTS narration yet).
 
 ### Technical Features
 
@@ -149,6 +149,9 @@ npm run dev
 |----------|---------|
 | `GNANI_API_KEY` | Gnani API key for STT/TTS calls |
 | `GEMINI_API_KEY` | Google Gemini API key (voice planning/replies and `/api/explain-code`) |
+| `GROQ_API_KEY` | Optional Groq API key for LLM fallback |
+| `GROQ_MODEL` | Groq model for fallback (default: `llama-3.3-70b-versatile`) |
+| `LLM_PRIMARY` / `LLM_FALLBACK` | LLM provider order (default: `gemini` → `groq`) |
 | `DATABASE_URL` | Postgres URL (Neon); falls back to SQLite at `.data/leo.db` |
 | `LEO_SESSION_SECRET` | Secret for signing session cookies |
 | `LEO_WORKSPACE_ROOT` | Directory holding per-user workspaces (default: `session`) |

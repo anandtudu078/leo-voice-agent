@@ -235,12 +235,12 @@ async def parse_voice_command(request: Request):
             f"User request: {instruction}\n"
         )
         try:
-            resp = await asyncio.to_thread(
-                client.models.generate_content,
-                model=GEMINI_MODEL,
+            text, _provider = await asyncio.to_thread(
+                llm_provider.generate_text,
                 contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                gemini_model=GEMINI_MODEL,
             )
-            return _strip_code_fences((getattr(resp, "text", None) or "").strip())
+            return _strip_code_fences((text or "").strip())
         except Exception:
             return ""
 
@@ -476,6 +476,10 @@ client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 # rate-limited upstream, so default to a model available to current keys.
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+from llm_provider import LLMFallbackProvider
+
+llm_provider = LLMFallbackProvider(gemini_client=client)
+
 SYSTEM_INSTRUCTION = (
     "You are Leo, a voice coding assistant inside a browser IDE. You are having "
     "a spoken conversation: keep answers short and natural (at most three "
@@ -617,13 +621,13 @@ async def _generate_reply(
     contents.append({"role": "user", "parts": [{"text": transcript}]})
 
     try:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=GEMINI_MODEL,
+        reply, _provider = await asyncio.to_thread(
+            llm_provider.generate_text,
             contents=contents,
-            config={"system_instruction": system},
+            system_instruction=system,
+            gemini_model=GEMINI_MODEL,
         )
-        reply = (response.text or "").strip()
+        reply = (reply or "").strip()
         return reply or "I heard you, but I'm not sure what to say yet."
     except Exception as exc:  # noqa: BLE001
         tl = (transcript or "").lower()
@@ -1486,11 +1490,13 @@ async def explain_code(request: Request, payload: ExplainCodeRequest):
         f"Path: {path or 'untitled'}. Language: {language}. Goal: {goal or 'implement the user request'}.\n\nCODE:\n" + code
     )
     try:
-        if not os.getenv("GEMINI_API_KEY"):
-            raise RuntimeError("no gemini key")
-        response = await asyncio.to_thread(client.models.generate_content, model=GEMINI_MODEL, contents=prompt)
-        text = getattr(response, "text", None) or ""
-        steps = _parse_explain_json(text, code, path, goal)
+        text, provider = await asyncio.to_thread(
+            llm_provider.generate_text,
+            contents=prompt,
+            gemini_model=GEMINI_MODEL,
+        )
+        steps = _parse_explain_json(text or "", code, path, goal)
+        return {"path": path, "language": language, "steps": steps, "provider": provider}
     except Exception:
         steps = _fallback_explain_steps(code, path, goal)
-    return {"path": path, "language": language, "steps": steps}
+        return {"path": path, "language": language, "steps": steps, "provider": "fallback"}

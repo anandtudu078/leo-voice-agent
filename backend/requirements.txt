@@ -8,3 +8,4 @@ google-genai
 python-multipart
 sqlalchemy>=2.0
 psycopg[binary]>=3.2
+groq>=0.11.0
