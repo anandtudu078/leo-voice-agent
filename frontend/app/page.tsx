@@ -17,17 +17,18 @@ export default function LandingPage() {
   const [showLogin, setShowLogin] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [year, setYear] = useState<number | null>(null)
-
-  useEffect(() => {
-    if (session && session.user) {
-      window.location.href = '/code'
-    }
-  }, [session])
-
-  // Keep the footer year current without calling Date during prerendering.
-  useEffect(() => {
-    setYear(new Date().getFullYear())
+  const [year, setYear] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (session && session.user) {
+      window.location.href = '/code'
+    }
+  }, [session])
+
+  // Keep the footer year current without calling Date during prerendering.
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => setYear(new Date().getFullYear()))
+    return () => window.cancelAnimationFrame(id)
   }, [])
 
   useEffect(() => {

@@ -56,7 +56,7 @@ export default function LoginPage({
         </form>
 
         <p className="text-sm text-muted-foreground">
-          Don't have an account?{" "}
+          Don&apos;t have an account?{" "}
           <button
             onClick={() => setAuth("logging-in")}
             className="underline underline-offset-2 hover:text-primary"

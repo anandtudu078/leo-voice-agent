@@ -241,16 +241,16 @@ async def parse_voice_command(request: Request):
         # Deterministic keyword fallback (robust to phrasing).
         tl = transcript.lower()
 
-        # Edit/open file (check before generic create/run where phrasing overlaps).
-        if re.search(r"\b(edit|modify|change|open|update)\b.*\bfile\b|\bfile\b.*\b(edit|modify|change|open|update)\b", tl):
+                # Edit/open file (check before generic create/run where phrasing overlaps).
+        if re.search(r"\b(edit|modify|change|open|update|show)\b", tl):
             path = _extract_filename(transcript)
             if not path:
-                m = re.search(r"\b(?:edit|modify|change|open|update)\s+(?:a\s+|the\s+)?(?:file\s+)?(.+)$", tl)
+                m = re.search(r"\b(?:edit|modify|change|open|update|show)\s+(?:a\s+|the\s+)?(?:file\s+)?(.+)$", tl)
                 path = _clean_path(m.group(1)) if m else None
-            if path:
+            if path and not re.search(r"\b(create|make|new)\b.*\b(file|folder|directory)\b", tl):
                 return JSONResponse({"action": "editFile", "payload": {"path": path}}, status_code=200)
 
-        # Create folder.
+# Create folder.
         if re.search(r"\b(create|make|new)\b.*\b(folder|directory)\b", tl):
             m = re.search(r"\b(?:folder|directory)\s+(?:named\s+|called\s+)?(.+)$", tl)
             if not m:

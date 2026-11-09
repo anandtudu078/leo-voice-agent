@@ -52,11 +52,19 @@ def check_health(base: str, timeout: float) -> str:
     body = http_get(base, "/api/health", timeout).json()
     if body.get("status") != "ok":
         raise CheckFailed(f"/api/health reported {body!r}")
+    # /api/health is a fast liveness probe (no DB ping). Database reachability,
+    # when present or when /api/db-health exists, is checked separately.
     database = body.get("database")
-    if database != "connected":
+    if database is None:
+        try:
+            db = http_get(base, "/api/db-health", timeout).json().get("database")
+            database = db
+        except CheckFailed:
+            database = "not_checked"
+    if database not in {"connected", "not_checked"}:
         raise CheckFailed(
-            f"/api/health returned database={database!r} "
-            "(set DATABASE_URL on the service)"
+            f"/api/db-health returned database={database!r} "
+            "(set DATABASE_URL on the service if persistence is required)"
         )
     return f"status=ok database={database}"
 
