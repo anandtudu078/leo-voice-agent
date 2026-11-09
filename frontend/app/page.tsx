@@ -99,32 +99,31 @@ export default function LandingPage() {
             </button>
           )}
         </div>
-      </header>
-
-      {/* ===== Hero ===== */}
+      </header>      {/* ===== Hero ===== */}
       <section id="top" className="relative overflow-hidden">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(99,91,255,0.22),transparent_70%)]"
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 opacity-[0.18] [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:64px_64px] [mask-image:radial-gradient(60%_50%_at_50%_0%,black,transparent)]"
-        />
+        <div aria-hidden="true" className="landing-orb left-[-8%] top-[-6%] h-72 w-72 bg-[#635bff]" style={{ animation: 'landing-pulse-soft 9s ease-in-out infinite' }} />
+        <div aria-hidden="true" className="landing-orb right-[-10%] top-[18%] h-64 w-64 bg-[#3b82f6] opacity-30" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(65%_55%_at_50%_-5%,rgba(99,91,255,0.28),transparent_72%)]" />
+        <div aria-hidden="true" className="landing-grid pointer-events-none absolute inset-0 opacity-60" />
 
-        <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-6 pb-20 pt-16 lg:grid-cols-[1.05fr_1fr] lg:pb-28 lg:pt-24">
+        <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-6 pb-16 pt-14 lg:grid-cols-[1.02fr_1.08fr] lg:gap-16 lg:pb-24 lg:pt-20">
           <div className="text-center lg:text-left">
-            <span className="inline-flex items-center gap-2 rounded-full border border-[#635bff]/30 bg-[#635bff]/10 px-3 py-1 text-xs font-medium text-[#b9b3ff]">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#8b83ff]" />
+            <span className="inline-flex items-center gap-2 rounded-full border border-[#635bff]/35 bg-[#635bff]/12 px-3.5 py-1.5 text-xs font-medium text-[#c4bfff] shadow-[0_0_0_1px_rgba(99,91,255,0.08)]">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#8b83ff] opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#8b83ff]" />
+              </span>
               Voice-first development workspace
             </span>
 
-            <h1 className="mt-6 text-4xl font-semibold leading-[1.08] tracking-tight sm:text-5xl lg:text-[3.4rem]">
+            <h1 className="mt-7 text-4xl font-semibold leading-[1.06] tracking-tight sm:text-5xl lg:text-[3.55rem]">
               Build software at the
-              <span className="bg-gradient-to-r from-[#a79fff] via-[#8b83ff] to-[#635bff] bg-clip-text text-transparent"> speed of speech</span>.
+              <span className="block bg-gradient-to-r from-[#c4bfff] via-[#9b93ff] to-[#635bff] bg-clip-text pb-1 text-transparent sm:inline sm:pb-0"> speed of speech</span>
+              <span className="sm:hidden">.</span>
+              <span className="hidden sm:inline">.</span>
             </h1>
 
-            <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-white/55 lg:mx-0 lg:text-lg">
+            <p className="mx-auto mt-5 max-w-xl text-[15px] leading-relaxed text-white/58 lg:mx-0 lg:text-lg">
               Leo is a code workspace you talk to. Describe a feature, a fix, or a
               whole file — the agent writes it, shows the diff in a real editor, and
               runs it in an isolated sandbox.
@@ -133,127 +132,137 @@ export default function LandingPage() {
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
               <button
                 onClick={openLogin}
-                className="inline-flex items-center gap-2 rounded-lg bg-[#635bff] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#635bff]/25 transition-colors hover:bg-[#7c6cff]"
+                className="group inline-flex items-center gap-2 rounded-xl bg-[#635bff] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#635bff]/30 ring-1 ring-white/10 transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#746cff] hover:shadow-xl hover:shadow-[#635bff]/35"
               >
-                <MicIcon />
+                <span className="transition-transform duration-200 group-hover:scale-110"><MicIcon /></span>
                 Start building free
               </button>
               <a
                 href="#product"
-                className="rounded-lg border border-white/10 px-5 py-3 text-sm font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white"
+                className="rounded-xl border border-white/12 bg-white/[0.03] px-5 py-3 text-sm font-medium text-white/75 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
               >
                 See the workspace
               </a>
             </div>
 
-            <ul className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-white/40 lg:justify-start">
-              {['No credit card', 'Files persist per account', 'Python & JavaScript sandbox'].map(
-                (item) => (
-                  <li key={item} className="flex items-center gap-1.5">
-                    <CheckIcon />
-                    {item}
-                  </li>
-                ),
-              )}
-            </ul>
+            <div className="mt-9 grid grid-cols-1 gap-2 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-3 text-left backdrop-blur-sm sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-white/[0.07]">
+              {['No credit card', 'Files persist per account', 'Python & JavaScript sandbox'].map((item) => (
+                <div key={item} className="flex items-center gap-2 px-1 py-1.5 text-xs text-white/55 sm:justify-center sm:px-3">
+                  <span className="shrink-0"><CheckIcon /></span>
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
-          <WorkspacePreview onTry={openLogin} />
+          <div className="landing-float lg:pt-2">
+            <WorkspacePreview onTry={openLogin} />
+          </div>
         </div>
       </section>
 
       {/* ===== Product preview copy ===== */}
-      <section id="product" className="border-y border-white/5 bg-white/[0.02]">
-        <div className="mx-auto grid max-w-6xl gap-10 px-6 py-16 md:grid-cols-3 md:py-20">
-          {[
-            {
-              title: 'One sentence in',
-              body: 'Press Speak, say what you want, and stop. Leo transcribes it, plans the change, and edits the files that matter.',
-            },
-            {
-              title: 'A real IDE out',
-              body: 'Browse folders, open tabs, edit by hand, save, and run. Everything you would expect from an editor, wired to the same workspace the agent uses.',
-            },
-            {
-              title: 'Output you can trust',
-              body: 'Runs happen in a sandbox with a hard timeout. Read the output in the terminal panel before you keep the change.',
-            },
-          ].map((item) => (
-            <div key={item.title}>
-              <div className="mb-3 h-px w-10 bg-gradient-to-r from-[#635bff] to-transparent" />
-              <h2 className="text-base font-semibold text-white">{item.title}</h2>
-              <p className="mt-2 text-sm leading-relaxed text-white/50">{item.body}</p>
-            </div>
-          ))}
+      <section id="product" className="relative border-y border-white/[0.06] bg-gradient-to-b from-white/[0.02] to-transparent">
+        <div className="mx-auto max-w-6xl px-6 py-16 md:py-20">
+          <div className="grid gap-4 md:grid-cols-3">
+            {[
+              {
+                n: '01',
+                title: 'One sentence in',
+                body: 'Press Speak, say what you want, and stop. Leo transcribes it, plans the change, and edits the files that matter.',
+              },
+              {
+                n: '02',
+                title: 'A real IDE out',
+                body: 'Browse folders, open tabs, edit by hand, save, and run. Everything you would expect from an editor, wired to the same workspace the agent uses.',
+              },
+              {
+                n: '03',
+                title: 'Output you can trust',
+                body: 'Runs happen in a sandbox with a hard timeout. Read the output in the terminal panel before you keep the change.',
+              },
+            ].map((item) => (
+              <article
+                key={item.title}
+                className="landing-card group relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0f1420]/80 p-6"
+              >
+                <div aria-hidden="true" className="absolute right-4 top-3 text-3xl font-semibold tracking-tight text-white/[0.04] transition-colors group-hover:text-[#635bff]/15">{item.n}</div>
+                <div className="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-[#635bff]/25 to-[#635bff]/5 text-xs font-semibold text-[#b9b3ff] ring-1 ring-[#635bff]/20">{item.n}</div>
+                <h2 className="text-base font-semibold text-white">{item.title}</h2>
+                <p className="mt-2 text-sm leading-relaxed text-white/52">{item.body}</p>
+              </article>
+            ))}
+          </div>
         </div>
-      </section>
+      </section>      {/* ===== Features ===== */}
+      <section id="features" className="relative mx-auto max-w-6xl px-6 py-20 md:py-24">
+        <div aria-hidden="true" className="pointer-events-none absolute right-0 top-24 h-56 w-56 rounded-full bg-[#635bff]/10 blur-3xl" />
+        <div className="relative grid gap-10 lg:grid-cols-[0.95fr_1.25fr] lg:items-start lg:gap-14">
+          <div className="lg:sticky lg:top-24">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8b83ff]">
+              Built for the whole loop
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl">
+              Everything you need between an idea and working code
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-white/52 md:text-base">
+              Voice is the fastest way in, but Leo never hides the code. Inspect,
+              edit, and run exactly like a normal editor.
+            </p>
+            <div className="mt-6 hidden h-px w-24 bg-gradient-to-r from-[#635bff]/60 to-transparent lg:block" />
+          </div>
 
-      {/* ===== Features ===== */}
-      <section id="features" className="mx-auto max-w-6xl px-6 py-20">
-        <div className="max-w-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8b83ff]">
-            Built for the whole loop
-          </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl">
-            Everything you need between an idea and working code
-          </h2>
-          <p className="mt-3 text-sm leading-relaxed text-white/50 md:text-base">
-            Voice is the fastest way in, but Leo never hides the code. Inspect,
-            edit, and run exactly like a normal editor.
-          </p>
-        </div>
-
-        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            {
-              icon: <MicIcon />,
-              title: 'Natural voice commands',
-              body: 'Open files, change code, or ask for a new feature in plain language.',
-            },
-            {
-              icon: <TreeIcon />,
-              title: 'A real file tree',
-              body: 'Create, rename, move, and delete files and folders without leaving the browser.',
-            },
-            {
-              icon: <CodeIcon />,
-              title: 'Editing that feels native',
-              body: 'Tabs, syntax highlighting, dirty markers, and cursor position in the status bar.',
-            },
-            {
-              icon: <PlayIcon />,
-              title: 'Run in a sandbox',
-              body: 'Execute Python and JavaScript with a 30-second limit and read the raw output.',
-            },
-            {
-              icon: <TerminalIcon />,
-              title: 'Terminal and output panels',
-              body: 'Follow every command, save, and run in one place — errors included.',
-            },
-            {
-              icon: <CommandIcon />,
-              title: 'Keyboard-first shortcuts',
-              body: 'Ctrl+S to save, Ctrl+Enter to run, Ctrl+J for the panel, Ctrl+K for commands.',
-            },
-          ].map((feature) => (
-            <div
-              key={feature.title}
-              className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-5 transition-colors hover:border-[#635bff]/30 hover:bg-white/[0.05]"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-[#635bff]/10 text-[#a79fff]">
-                {feature.icon}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              {
+                icon: <MicIcon />,
+                title: 'Natural voice commands',
+                body: 'Open files, change code, or ask for a new feature in plain language.',
+              },
+              {
+                icon: <TreeIcon />,
+                title: 'A real file tree',
+                body: 'Create, rename, move, and delete files and folders without leaving the browser.',
+              },
+              {
+                icon: <CodeIcon />,
+                title: 'Editing that feels native',
+                body: 'Tabs, syntax highlighting, dirty markers, and cursor position in the status bar.',
+              },
+              {
+                icon: <PlayIcon />,
+                title: 'Run in a sandbox',
+                body: 'Execute Python and JavaScript with a 30-second limit and read the raw output.',
+              },
+              {
+                icon: <TerminalIcon />,
+                title: 'Terminal and output panels',
+                body: 'Follow every command, save, and run in one place — errors included.',
+              },
+              {
+                icon: <CommandIcon />,
+                title: 'Keyboard-first shortcuts',
+                body: 'Ctrl+S to save, Ctrl+Enter to run, Ctrl+J for the panel, Ctrl+K for commands.',
+              },
+            ].map((feature) => (
+              <div
+                key={feature.title}
+                className="landing-card group rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.045] to-white/[0.02] p-5"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#635bff]/20 bg-[#635bff]/12 text-[#b9b3ff] shadow-[0_0_24px_-12px_rgba(99,91,255,0.8)] transition-transform duration-200 group-hover:scale-105">
+                  {feature.icon}
+                </div>
+                <h3 className="mt-4 text-sm font-semibold text-white">{feature.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-white/48">{feature.body}</p>
               </div>
-              <h3 className="mt-4 text-sm font-semibold text-white">{feature.title}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-white/45">{feature.body}</p>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </section>
-
-      {/* ===== How it works ===== */}
-      <section id="how-it-works" className="border-t border-white/5 bg-white/[0.02]">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      </section>      {/* ===== How it works ===== */}
+      <section id="how-it-works" className="relative border-t border-white/[0.06] bg-white/[0.015]">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#635bff]/30 to-transparent" />
+        <div className="mx-auto max-w-6xl px-6 py-20 md:py-24">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8b83ff]">
                 How it works
@@ -264,45 +273,54 @@ export default function LandingPage() {
             </div>
             <button
               onClick={openLogin}
-              className="self-start rounded-lg bg-[#635bff] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#7c6cff] md:self-auto"
+              className="self-start rounded-xl border border-white/12 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/85 transition-all hover:-translate-y-0.5 hover:border-[#635bff]/35 hover:bg-[#635bff]/10 hover:text-white md:self-auto"
             >
               Open the workspace
             </button>
           </div>
 
-          <ol className="mt-12 grid gap-6 md:grid-cols-3">
-            {[
-              {
-                n: '01',
-                title: 'Sign in',
-                body: 'Pick an email address. Leo provisions a private workspace for you on the server.',
-              },
-              {
-                n: '02',
-                title: 'Speak or type',
-                body: 'Say “add a health check endpoint”, or open a file and start editing by hand.',
-              },
-              {
-                n: '03',
-                title: 'Save and run',
-                body: 'Review the change, press Save, then Run to see the output in the terminal.',
-              },
-            ].map((step) => (
-              <li key={step.n} className="relative rounded-xl border border-white/[0.07] bg-[#0f1420] p-6">
-                <span className="text-xs font-semibold tracking-widest text-[#635bff]">
-                  STEP {step.n}
-                </span>
-                <h3 className="mt-3 text-base font-semibold">{step.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-white/45">{step.body}</p>
-              </li>
-            ))}
-          </ol>
+          <div className="relative mt-12">
+            <div aria-hidden="true" className="absolute left-0 right-0 top-[2.35rem] hidden h-px bg-gradient-to-r from-[#635bff]/10 via-[#635bff]/35 to-[#635bff]/10 md:block" />
+            <ol className="grid gap-4 md:grid-cols-3 md:gap-5">
+              {[
+                {
+                  n: '01',
+                  title: 'Sign in',
+                  body: 'Pick an email address. Leo provisions a private workspace for you on the server.',
+                },
+                {
+                  n: '02',
+                  title: 'Speak or type',
+                  body: 'Say “add a health check endpoint”, or open a file and start editing by hand.',
+                },
+                {
+                  n: '03',
+                  title: 'Save and run',
+                  body: 'Review the change, press Save, then Run to see the output in the terminal.',
+                },
+              ].map((step) => (
+                <li key={step.n} className="landing-card group relative rounded-2xl border border-white/[0.08] bg-gradient-to-b from-[#141a2b] to-[#0f1420] p-6">
+                  <div className="flex items-center gap-3">
+                    <span className="relative z-[1] flex h-10 w-10 items-center justify-center rounded-xl bg-[#635bff] text-sm font-semibold text-white shadow-lg shadow-[#635bff]/25 ring-4 ring-[#0b0f19]">
+                      {step.n}
+                    </span>
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b83ff]/80">
+                      STEP {step.n}
+                    </span>
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold text-white">{step.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-white/48">{step.body}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
       </section>
 
       {/* ===== Command examples ===== */}
-      <section className="mx-auto max-w-6xl px-6 py-20">
-        <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+      <section className="relative mx-auto max-w-6xl overflow-hidden px-6 py-20 md:py-24">
+        <div aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#635bff]/8 blur-3xl" />
+        <div className="relative grid gap-10 lg:grid-cols-[0.88fr_1.12fr] lg:items-center">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#8b83ff]">
               Say it, don&apos;t type it
@@ -310,7 +328,7 @@ export default function LandingPage() {
             <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl">
               A few things you can ask for
             </h2>
-            <p className="mt-3 max-w-md text-sm leading-relaxed text-white/50">
+            <p className="mt-3 max-w-md text-sm leading-relaxed text-white/52">
               Leo keeps the conversation in context, so follow-ups work the way you
               expect — “make it async”, “add a test”, “run it again”.
             </p>
@@ -322,15 +340,16 @@ export default function LandingPage() {
               'Refactor utils.js into smaller functions.',
               'Add type hints to everything in main.py.',
               'Fix the failing test and explain the change.',
-            ].map((command) => (
+            ].map((command, i) => (
               <li
                 key={command}
-                className="flex items-start gap-3 rounded-lg border border-white/[0.07] bg-white/[0.03] px-4 py-3"
+                className="landing-card flex items-start gap-3 rounded-2xl border border-white/[0.08] bg-gradient-to-r from-white/[0.04] to-white/[0.02] px-4 py-3.5"
+                style={{ marginLeft: i % 2 ? '0.75rem' : 0, marginRight: i % 2 ? 0 : '0.75rem' }}
               >
-                <span className="mt-0.5 text-[#8b83ff]">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#635bff]/12 text-[#a79fff] ring-1 ring-[#635bff]/15">
                   <QuoteIcon />
                 </span>
-                <span className="text-sm text-white/70">{command}</span>
+                <span className="text-sm leading-relaxed text-white/72">{command}</span>
               </li>
             ))}
           </ul>
@@ -338,26 +357,30 @@ export default function LandingPage() {
       </section>
 
       {/* ===== CTA ===== */}
-      <section className="px-6 pb-20">
-        <div className="relative mx-auto max-w-6xl overflow-hidden rounded-2xl border border-[#635bff]/25 bg-gradient-to-br from-[#151a2b] via-[#141927] to-[#0f1420] px-8 py-12 text-center">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_80%_at_50%_0%,rgba(99,91,255,0.25),transparent_70%)]"
-          />
-          <h2 className="relative text-2xl font-semibold tracking-tight md:text-3xl">
-            Your next feature is one sentence away
-          </h2>
-          <p className="relative mx-auto mt-3 max-w-xl text-sm text-white/50">
-            Sign in with any email to open a workspace. No install, no setup — the
-            editor loads in your browser.
-          </p>
-          <button
-            onClick={openLogin}
-            className="relative mt-7 inline-flex items-center gap-2 rounded-lg bg-[#635bff] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-[#635bff]/25 transition-colors hover:bg-[#7c6cff]"
-          >
-            <MicIcon />
-            Open Leo
-          </button>
+      <section className="px-6 pb-20 md:pb-24">
+        <div className="relative mx-auto max-w-6xl overflow-hidden rounded-3xl border border-[#635bff]/25 bg-gradient-to-br from-[#171d31] via-[#121827] to-[#0d1220] px-6 py-12 text-center shadow-[0_30px_80px_-40px_rgba(99,91,255,0.45)] sm:px-10 sm:py-14">
+          <div aria-hidden="true" className="landing-grid pointer-events-none absolute inset-0 opacity-30" />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(55%_90%_at_50%_-10%,rgba(99,91,255,0.32),transparent_68%)]" />
+          <div aria-hidden="true" className="pointer-events-none absolute -bottom-20 left-1/2 h-56 w-[28rem] -translate-x-1/2 rounded-full bg-[#635bff]/20 blur-3xl" />
+          <div className="relative">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-white/55">
+              Ready when you are
+            </span>
+            <h2 className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl md:text-[2.1rem]">
+              Your next feature is one sentence away
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-white/52 sm:text-[15px]">
+              Sign in with any email to open a workspace. No install, no setup — the
+              editor loads in your browser.
+            </p>
+            <button
+              onClick={openLogin}
+              className="group mt-8 inline-flex items-center gap-2 rounded-xl bg-[#635bff] px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-[#635bff]/30 ring-1 ring-white/10 transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#746cff] hover:shadow-xl hover:shadow-[#635bff]/35"
+            >
+              <span className="transition-transform duration-200 group-hover:scale-110"><MicIcon /></span>
+              Open Leo
+            </button>
+          </div>
         </div>
       </section>
 
