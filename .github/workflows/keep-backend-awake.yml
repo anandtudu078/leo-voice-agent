@@ -1,10 +1,11 @@
-name: Keep backend awake
+name: Keep backend awake 24x7
 
 on:
   schedule:
-    # Render sleeps idle free services; a ping every 10 minutes keeps it warm.
-    - cron: '*/10 * * * *'
+    # Ping every 5 minutes to ensure Render free tier never sleeps.
+    # Render sleeps after 15 min of inactivity; 5-min interval is safe margin.    - cron: '*/5 * * * *'
   workflow_dispatch:
+    # Manual trigger: click Actions → Run workflow to immediately ping backend
 
 permissions: {}
 
@@ -17,12 +18,12 @@ jobs:
         env:
           HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL || 'https://leo-voice-agent-backend.onrender.com/api/health' }}
         run: |
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5; do
             if curl -sSf --max-time 30 "$HEALTH_URL" > /dev/null; then
               echo "Backend answered on attempt $attempt"
               exit 0
             fi
-            sleep 15
+            sleep 10
           done
-          echo "Backend did not answer at $HEALTH_URL"
+          echo "Backend did not answer at $HEALTH_URL after 5 attempts"
           exit 1
