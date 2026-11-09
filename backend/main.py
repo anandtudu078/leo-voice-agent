@@ -181,64 +181,83 @@ async def db_health():
 
 @app.post("/api/parse-voice-command")
 async def parse_voice_command(request: Request):
-    """Extract intent from a voice transcript using the Gemini planner.
-    Returns JSON: {"action": "create_file"|"create_folder"|"run", "payload": {path?, code?}}."""
+    """Extract intent from a voice transcript.
+    Returns JSON: {"action": "createFile"|"createFolder"|"editFile"|"runFile"|"none", "payload": {...}}."""
+    import re
+
     body = await request.json()
-    transcript = body.get("transcript", "")
+    transcript = (body.get("transcript") or "").strip()
     if not transcript:
         return JSONResponse({"action": "none", "payload": None}, status_code=200)
+
+    def _clean_path(raw: str) -> str:
+        p = (raw or "").strip().strip('"').strip("'").strip("`")
+        # strip trailing punctuation from speech artifacts
+        p = re.sub(r"[.,!?;:]+$", "", p).strip()
+        # common spoken forms: "dot py" -> ".py"
+        p = re.sub(r"\s+dot\s+([a-zA-Z0-9]+)\b", r".\1", p, flags=re.IGNORECASE)
+        p = re.sub(r"\s+", " ", p)
+        return p
+
+    def _extract_filename(text: str) -> str | None:
+        m = re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", text)
+        return _clean_path(m.group(1)) if m else None
+
     try:
-        plan = await asyncio.to_thread(plan_from_transcript, transcript, [])
-        action = None
-        payload: dict | None = None
-        if plan.get("action") == "read" and plan.get("tool") == "read_file":
-            action = "readFile"
-            payload = {"path": plan.get("path")}
-        elif plan.get("action") == "write" and plan.get("tool") == "write_file":
-            action = "createFile"
-            payload = {"path": plan.get("path"), "code": plan.get("code")}
-        elif plan.get("action") == "run" and plan.get("tool") == "run_script":
-            action = "runFile"
-            payload = {"path": plan.get("path")}
-        else:
-            # fallback: try simple keyword match
-            tl = transcript.lower()
-            if "create a file" in tl or "new file" in tl:
-                # extract path after "create a file" or "new file"
-                import re
-                m = re.search(r"create a file (.+?)(\.\.\.\w+)?|new file (.+?)(\.\.\.\w+)?", tl)
-                if m:
-                    path = (m.group(1) or m.group(3)).strip()
-                    code = m.group(2) or m.group(4) or ""
-                    action = "createFile"
-                    payload = {"path": path, "code": code}
-            elif "create a folder" in tl or "new folder" in tl:
-                import re
-                m = re.search(r"create a folder (.+)|new folder (.+)", tl)
-                if m:
-                    path = (m.group(1) or m.group(2)).strip()
-                    action = "createFolder"
-                    payload = {"path": path}
-            elif "run" in tl or "execute" in tl:
-                # Check for edit file first (more specific), then run/execute
-                if "edit a file" in tl or "modify a file" in tl or ("change" in tl.lower() and "file" in tl.lower()):
-                    import re
-                    m = re.search(r"(?:edit|modify|change) (?:a |the )?file (.+?)(\.\.\w+)?", tl)
-                    if m:
-                        path = m.group(1).strip()
-                        action = "editFile"
-                        payload = {"path": path}
-                elif re.search(r"run (\.\.\.\w+)|execute (\.\.\.\w+)", tl):
-                    import re
-                    m = re.search(r"run (\.\.\.\w+)|execute (\.\.\.\w+)", tl)
-                    if m:
-                        path = m.group(1) or m.group(2)
-                        action = "runFile"
-                        payload = {"path": path}
-            if not action:
-                action = "none"
-                payload = None
-        return JSONResponse({"action": action, "payload": payload}, status_code=200)
+        # Try the LLM planner first (best effort).
+        try:
+            plan = await asyncio.to_thread(plan_from_transcript, transcript, [])
+        except Exception:
+            plan = {}
+
+        if plan.get("action") == "read" and plan.get("tool") == "read_file" and plan.get("path"):
+            return JSONResponse({"action": "editFile", "payload": {"path": _clean_path(plan["path"])}}, status_code=200)
+        if plan.get("action") == "write" and plan.get("tool") == "write_file" and plan.get("path"):
+            return JSONResponse(
+                {"action": "createFile", "payload": {"path": _clean_path(plan["path"]), "code": plan.get("code") or ""}},
+                status_code=200,
+            )
+        if plan.get("action") == "run" and plan.get("tool") == "run_script" and plan.get("path"):
+            return JSONResponse({"action": "runFile", "payload": {"path": _clean_path(plan["path"])}}, status_code=200)
+
+        # Deterministic keyword fallback (robust to phrasing).
+        tl = transcript.lower()
+
+        # Edit/open file (check before generic create/run where phrasing overlaps).
+        if re.search(r"\b(edit|modify|change|open|update)\b.*\bfile\b|\bfile\b.*\b(edit|modify|change|open|update)\b", tl):
+            path = _extract_filename(transcript)
+            if not path:
+                m = re.search(r"\b(?:edit|modify|change|open|update)\s+(?:a\s+|the\s+)?(?:file\s+)?(.+)$", tl)
+                path = _clean_path(m.group(1)) if m else None
+            if path:
+                return JSONResponse({"action": "editFile", "payload": {"path": path}}, status_code=200)
+
+        # Create folder.
+        if re.search(r"\b(create|make|new)\b.*\b(folder|directory)\b", tl):
+            m = re.search(r"\b(?:folder|directory)\s+(?:named\s+|called\s+)?(.+)$", tl)
+            if not m:
+                m = re.search(r"\b(?:create|make|new)\s+(?:a\s+)?(?:folder|directory)\s+(?:named\s+|called\s+)?(.+)$", tl)
+            path = _clean_path(m.group(1)) if m else "new-folder"
+            return JSONResponse({"action": "createFolder", "payload": {"path": path}}, status_code=200)
+
+        # Create file.
+        if re.search(r"\b(create|make|new)\b.*\bfile\b", tl):
+            path = _extract_filename(transcript)
+            if not path:
+                m = re.search(r"\bfile\s+(?:named\s+|called\s+)?(.+)$", tl)
+                path = _clean_path(m.group(1)) if m else "untitled.py"
+            return JSONResponse({"action": "createFile", "payload": {"path": path, "code": ""}}, status_code=200)
+
+        # Run/execute.
+        if re.search(r"\b(run|execute|start)\b", tl):
+            path = _extract_filename(transcript)
+            if not path:
+                m = re.search(r"\b(?:run|execute|start)\s+(?:the\s+|file\s+|script\s+)?(.+)$", tl)
+                path = _clean_path(m.group(1)) if m else None
+            if path:
+                return JSONResponse({"action": "runFile", "payload": {"path": path}}, status_code=200)
+
+        return JSONResponse({"action": "none", "payload": None}, status_code=200)
     except Exception as e:
         return JSONResponse({"action": "none", "payload": None, "error": str(e)}, status_code=200)
 
@@ -681,7 +700,7 @@ async def websocket_process_voice(websocket: WebSocket):
                     await websocket.send_json({"type": "transcript", "transcript": transcript})
                     await run_turn(transcript)
 
-            elif msg_type == "read_file":
+            elif msg_type in {"read_file", "editFile", "edit_file", "open_file"}:
                 try:
                     content = workspace_executor.read(workspace, path)
                 except SandboxExecutionError as exc:
@@ -697,9 +716,13 @@ async def websocket_process_voice(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "error": str(exc)})
                     continue
                 if workspace_id is not None and path:
-                    await asyncio.to_thread(
-                        repository.save_file_snapshot, workspace_id, path, code
-                    )
+                    try:
+                        await asyncio.to_thread(
+                            repository.save_file_snapshot, workspace_id, path, code
+                        )
+                    except Exception:
+                        # Non-fatal: file is saved on disk; DB snapshot is best-effort.
+                        pass
                 await websocket.send_json({"type": "file", "path": path, "content": code})
                 await websocket.send_json(
                     {
@@ -716,9 +739,12 @@ async def websocket_process_voice(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "error": str(exc)})
                     continue
                 if workspace_id is not None and path:
-                    await asyncio.to_thread(
-                        repository.delete_file_snapshot, workspace_id, path
-                    )
+                    try:
+                        await asyncio.to_thread(
+                            repository.delete_file_snapshot, workspace_id, path
+                        )
+                    except Exception:
+                        pass
                 await websocket.send_json(
                     {
                         "type": "logs",
