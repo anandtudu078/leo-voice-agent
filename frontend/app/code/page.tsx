@@ -145,6 +145,8 @@ function CodeSpaceShell({
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [panelTab, setPanelTab] = useState<'terminal' | 'output' | 'problems' | 'voice'>('output')
   const [messages, setMessages] = useState<{ id: number; role: 'user' | 'leo'; text: string }[]>([])
+  const [creationMode, setCreationMode] = useState<'none' | 'ask' | 'path'>('none')
+  const [folderSelectMode, setFolderSelectMode] = useState<'none' | 'ask' | 'chosen'>('none')
   const [commandInput, setCommandInput] = useState('')
 
   const messageIdRef = useRef(0)
@@ -644,9 +646,89 @@ function CodeSpaceShell({
     else void startRecording()
   }
 
-  const sendTextCommand = () => {
+  const sendTextCommand = async () => {
     const text = commandInput.trim()
     if (!text) return
+
+    // Conversational file creation assistant
+    const createFileRegex = /(create|new)\s+a?\s+file/i
+    if (createFileRegex.test(text) && creationMode === 'none') {
+      setCreationMode('ask')
+      pushMessage('leo', "I'd be happy to help you create a new file! What's the file path (e.g., `components/Leo.tsx`)? You can also say 'open folder' or 'clone a repo'.")
+      setCommandInput('')
+      return
+    }
+
+    // Conversational folder selection assistant
+    if (folderSelectMode === 'none') {
+      const selectFolderRegex = /(select|choose)\s+a?\s+folder/i
+      if (selectFolderRegex.test(text)) {
+        setFolderSelectMode('ask')
+        pushMessage('leo', "I can list your folders. Please type the path of the folder you want (e.g., `components`).")
+        setCommandInput('')
+        return
+      }
+    }
+
+    if (folderSelectMode === 'ask') {
+      const path = text.trim()
+      if (path) {
+        try {
+          const entries = await listWorkspace()
+          const folder = entries.find((e) => e.kind === 'dir' && e.path === path)
+          if (folder) {
+            setActiveFile(path)
+            setFolderSelectMode('chosen')
+            pushMessage('leo', `> Selected folder ${path}`)
+            pushLog(`> Selected folder ${path}`)
+          } else {
+            const match = entries.find(
+              (e) => e.kind === 'dir' && (e.path === path || e.path.startsWith(path + '/'))
+            )
+            if (match) {
+              setActiveFile(match.path)
+              setFolderSelectMode('chosen')
+              pushMessage('leo', `> Selected folder ${match.path}`)
+              pushLog(`> Selected folder ${match.path}`)
+            } else {
+              pushMessage(
+                'leo',
+                `I couldn't find a folder at "${path}". Type the full path or try a different name.`
+              )
+            }
+          }
+        } catch (err) {
+          pushMessage('leo', `ERROR: could not list folders — ${describeError(err)}`)
+          pushLog(`ERROR: could not list folders — ${describeError(err)}`)
+        }
+        setFolderSelectMode('none')
+      } else {
+        pushMessage('leo', "I didn't catch the folder path. Please type the path (e.g., `components`).")
+      }
+      setCommandInput('')
+      return
+    }
+
+    if (creationMode === 'ask') {
+      const path = text.trim()
+      if (path) {
+        try {
+          setFiles(await writeWorkspaceFile(path, ''))
+          setOffline(false)
+          pushMessage('leo', `> Created ${path}`)
+          pushLog(`> Created ${path}`)
+        } catch (err) {
+          pushMessage('leo', `ERROR: could not create ${path} — ${describeError(err)}`)
+          pushLog(`ERROR: could not create ${path} — ${describeError(err)}`)
+        }
+        setCreationMode('none')
+      } else {
+        pushMessage('leo', "I didn't catch the path. Please tell me the file path (e.g., `components/Leo.tsx`).")
+      }
+      setCommandInput('')
+      return
+    }
+
     if (socketRef.current?.readyState !== WebSocket.OPEN) {
       pushLog('ERROR: voice socket is not connected — retrying in a moment')
       connectRef.current()
@@ -866,9 +948,9 @@ function CodeSpaceShell({
                 </div>
 
                 <form
-                  onSubmit={(event) => {
+                  onSubmit={async (event) => {
                     event.preventDefault()
-                    sendTextCommand()
+                    await sendTextCommand()
                   }}
                   className="flex shrink-0 items-center gap-2"
                 >
