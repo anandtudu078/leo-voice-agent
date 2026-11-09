@@ -167,9 +167,15 @@ init_db()
 
 @app.get("/api/health")
 async def health():
-    """Liveness probe for Render (and any uptime monitor)."""
+    """Liveness probe for Render (and any uptime monitor). Returns instantly."""
+    return {"status": "ok"}
+
+
+@app.get("/api/db-health")
+async def db_health():
+    """Optional: database reachability probe. Returns instantly; the IDE does not use it by default."""
     database_ok = await asyncio.to_thread(ping_database)
-    return {"status": "ok", "database": "connected" if database_ok else "unavailable"}
+    return {"database": "connected" if database_ok else "unavailable"}
 
 
 @app.middleware("http")
