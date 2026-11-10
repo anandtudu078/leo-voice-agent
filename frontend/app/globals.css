@@ -497,3 +497,80 @@ body {
   color: #c9c4ff;
   background: rgba(99, 91, 255, 0.12);
 }
+
+/* Responsive IDE layout */
+.ide-panel-header {
+  background: linear-gradient(180deg, rgba(28, 33, 46, 0.98), rgba(22, 27, 39, 0.98));
+}
+
+@media (max-width: 900px) {
+  .ide-titlebar {
+    height: auto;
+    min-height: 44px;
+    padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .ide-workbench {
+    min-height: 0;
+  }
+  .ide-rail-row {
+    width: 100%;
+    border-bottom: 1px solid var(--ide-border);
+    background: var(--ide-sidebar);
+  }
+  .ide-activitybar {
+    flex-direction: row;
+    width: auto;
+    height: auto;
+    padding: 0.35rem;
+    border-right: 1px solid var(--ide-border);
+    border-bottom: 0;
+    gap: 0.35rem;
+  }
+  .ide-sidebar {
+    flex: 1;
+    min-width: 0;
+    width: auto !important;
+    max-height: 38vh;
+    border-right: 0;
+  }
+  .ide-editor-area {
+    min-height: 40vh;
+  }
+  .ide-panel.open {
+    height: min(40vh, 360px);
+  }
+  .ide-statusbar {
+    height: auto;
+    min-height: 28px;
+    flex-wrap: wrap;
+    row-gap: 0.2rem;
+    padding-top: 0.2rem;
+    padding-bottom: 0.2rem;
+  }
+  .ide-tabbar-actions {
+    padding-right: 0.25rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .ide-sidebar {
+    max-height: 45vh;
+  }
+  .ide-tabbar {
+    flex-wrap: wrap;
+    height: auto;
+  }
+  .ide-tabbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+    padding: 0.25rem 0.5rem 0.4rem;
+    border-top: 1px solid var(--ide-border);
+  }
+  .ide-panel-content {
+    padding: 0.5rem;
+  }
+}
