@@ -11,6 +11,7 @@ interface SideBarProps {
   view: string
   loading?: boolean
   offline?: boolean
+  recentImports?: { name: string; importedAt: number; fileCount: number }[]
   onOpenFile: (path: string) => void
   onCreateFile: (dir: string) => void
   onCreateFolder: (dir: string) => void
@@ -18,6 +19,7 @@ interface SideBarProps {
   onRename: (path: string) => void
   onDelete: (path: string) => void
   onRefresh: () => void
+  onClearRecentImports?: () => void
   onToggle: () => void
   onSelectView: (view: string) => void
 }
@@ -196,6 +198,7 @@ export function SideBar({
   view,
   loading = false,
   offline = false,
+  recentImports = [],
   onOpenFile,
   onCreateFile,
   onCreateFolder,
@@ -203,6 +206,7 @@ export function SideBar({
   onRename,
   onDelete,
   onRefresh,
+  onClearRecentImports,
   onToggle,
   onSelectView,
 }: SideBarProps) {
@@ -323,7 +327,7 @@ export function SideBar({
   }
 
   return (
-    <aside className="ide-sidebar w-60 shrink-0 flex flex-col">
+    <aside className="ide-sidebar w-full md:w-60 shrink-0 flex flex-col max-h-[40vh] md:max-h-none border-b md:border-b-0">
       <div className="ide-sidebar-title flex items-center justify-between">
         <span>{VIEW_TITLES[view] || 'EXPLORER'}</span>
         <button
@@ -395,6 +399,46 @@ export function SideBar({
               >
                 <IconRefresh />
               </button>
+            </div>
+          )}
+
+          {isExplorer && recentImports.length > 0 && (
+            <div className="border-b border-white/5 px-2 py-2">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-white/35">
+                  Recent imports
+                </span>
+                {onClearRecentImports && (
+                  <button
+                    onClick={onClearRecentImports}
+                    className="text-[10px] text-white/35 hover:text-white/70 transition-colors"
+                    title="Clear recent imports"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1">
+                {recentImports.slice(0, 5).map((item) => (
+                  <button
+                    key={`${item.name}-${item.importedAt}`}
+                    onClick={onOpenFolder}
+                    className="w-full rounded-md border border-white/5 bg-white/[0.02] px-2 py-1.5 text-left hover:bg-white/[0.06] hover:border-white/10 transition-colors"
+                    title={`Reopen/import a folder (last: ${item.name}, ${item.fileCount} files)`}
+                  >
+                    <div className="truncate text-[11px] font-medium text-white/75">
+                      {item.name}
+                    </div>
+                    <div className="text-[10px] text-white/35">
+                      {item.fileCount} file{item.fileCount === 1 ? '' : 's'} ·{' '}
+                      {new Date(item.importedAt).toLocaleDateString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-1 text-[10px] text-white/30">
+                Click an item to import a folder from your system again.
+              </div>
             </div>
           )}
 

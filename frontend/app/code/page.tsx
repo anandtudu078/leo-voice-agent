@@ -218,6 +218,9 @@ function CodeSpaceShell({
   const [recording, setRecording] = useState(false)
   const [loadingTree, setLoadingTree] = useState(true)
   const [offline, setOffline] = useState(false)
+  const [recentImports, setRecentImports] = useState<
+    { name: string; importedAt: number; fileCount: number }[]
+  >([])
   const [runningPath, setRunningPath] = useState<string | null>(null)
   const [cursor, setCursor] = useState({ line: 1, col: 1 })
   const [panelOpen, setPanelOpen] = useState(true)
@@ -356,6 +359,30 @@ function CodeSpaceShell({
     setCursor({ line: 1, col: 1 })
   }, [])
 
+  const recordRecentImport = useCallback((name: string, fileCount: number) => {
+    setRecentImports((prev) => {
+      const next = [
+        { name, importedAt: Date.now(), fileCount },
+        ...prev.filter((r) => r.name !== name),
+      ].slice(0, 8)
+      try {
+        window.localStorage.setItem('leo_recent_imports', JSON.stringify(next))
+      } catch {
+        // ignore
+      }
+      return next
+    })
+  }, [])
+
+  const clearRecentImports = useCallback(() => {
+    setRecentImports([])
+    try {
+      window.localStorage.removeItem('leo_recent_imports')
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const dismissPendingExplanation = useCallback(() => {
     setPendingExplanation(null)
   }, [])
@@ -458,6 +485,30 @@ function CodeSpaceShell({
       setOffline(true)
     }
   }, [pushLog])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem('leo_recent_imports')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          setRecentImports(
+            parsed
+              .filter(
+                (x) =>
+                  x &&
+                  typeof x.name === 'string' &&
+                  typeof x.fileCount === 'number',
+              )
+              .slice(0, 8),
+          )
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -1031,6 +1082,7 @@ function CodeSpaceShell({
 
   const uploadLocalFiles = async (
     entries: Array<{ path: string; file: File }>,
+    folderName?: string,
   ) => {
     const filtered = entries.filter(
       (e) => e.path && !shouldSkipImportPath(e.path),
@@ -1068,7 +1120,10 @@ function CodeSpaceShell({
         'leo',
         `Imported ${imported} file(s) from the selected folder${skipped ? ` (skipped ${skipped} binary/unreadable)` : ''}.`,
       )
-      if (imported > 0) setSidebarOpen(true)
+      if (imported > 0) {
+        setSidebarOpen(true)
+        recordRecentImport(folderName || 'Imported folder', imported)
+      }
     } catch (err) {
       pushLog(`ERROR: could not import folder — ${describeError(err)}`)
       pushMessage('leo', `Could not import folder: ${describeError(err)}`)
@@ -1105,7 +1160,7 @@ function CodeSpaceShell({
           }
         }
         await walk(dirHandle, '')
-        await uploadLocalFiles(collected)
+        await uploadLocalFiles(collected, dirHandle?.name || 'Imported folder')
         return
       } catch (err: any) {
         if (err?.name === 'AbortError') return
@@ -1132,8 +1187,16 @@ function CodeSpaceShell({
       const path = parts.length > 1 ? parts.slice(1).join('/') : rel
       return { path, file: f }
     })
+    const folderName =
+      filesArr[0] &&
+      (filesArr[0] as any).webkitRelativePath &&
+      String((filesArr[0] as any).webkitRelativePath).split('/').filter(Boolean)[0]
+        ? String((filesArr[0] as any).webkitRelativePath)
+            .split('/')
+            .filter(Boolean)[0]
+        : 'Imported folder'
     e.target.value = ''
-    await uploadLocalFiles(collected)
+    await uploadLocalFiles(collected, folderName)
   }
 
   const deleteEntry = async (path: string) => {
@@ -1595,34 +1658,38 @@ function CodeSpaceShell({
       </header>
 
       {/* ===== Workbench ===== */}
-      <div className="flex flex-1 min-h-0 min-w-0">
-        <ActivityBar
-          active={activeView}
-          onSelect={(id) => {
-            setActiveView(id)
-            setSidebarOpen(true)
-          }}
-        />
-
-        {sidebarOpen && (
-          <SideBar
-            files={files}
-            activeFile={activeFile}
-            dirtyPaths={dirtyPaths}
-            view={activeView}
-            loading={loadingTree}
-            offline={offline}
-            onOpenFile={(path) => void openFile(path)}
-            onCreateFile={(dir) => void createFile(dir)}
-            onCreateFolder={(dir) => void createFolder(dir)}
-            onOpenFolder={() => void openSystemFolder()}
-            onRename={(path) => void renameEntry(path)}
-            onDelete={(path) => void deleteEntry(path)}
-            onRefresh={() => void refreshTree()}
-            onToggle={() => setSidebarOpen(false)}
-            onSelectView={setActiveView}
+      <div className="ide-workbench flex flex-1 min-h-0 min-w-0 flex-col md:flex-row">
+        <div className="ide-rail-row flex shrink-0 md:contents">
+          <ActivityBar
+            active={activeView}
+            onSelect={(id) => {
+              setActiveView(id)
+              setSidebarOpen(true)
+            }}
           />
-        )}
+
+          {sidebarOpen && (
+            <SideBar
+              files={files}
+              activeFile={activeFile}
+              dirtyPaths={dirtyPaths}
+              view={activeView}
+              loading={loadingTree}
+              offline={offline}
+              recentImports={recentImports}
+              onOpenFile={(path) => void openFile(path)}
+              onCreateFile={(dir) => void createFile(dir)}
+              onCreateFolder={(dir) => void createFolder(dir)}
+              onOpenFolder={() => void openSystemFolder()}
+              onRename={(path) => void renameEntry(path)}
+              onDelete={(path) => void deleteEntry(path)}
+              onRefresh={() => void refreshTree()}
+              onClearRecentImports={clearRecentImports}
+              onToggle={() => setSidebarOpen(false)}
+              onSelectView={setActiveView}
+            />
+          )}
+        </div>
 
         <section className="flex-1 flex flex-col min-w-0 min-h-0">
           {pendingExplanation && (
@@ -1804,28 +1871,42 @@ function CodeSpaceShell({
             }
           >
             {panelTab === 'output' && (
-              <div className="flex flex-col h-full min-h-0 gap-1">
-                <div className="text-[11px] uppercase tracking-wider text-white/35 shrink-0">
-                  Output
+              <div className="flex h-full min-h-0 flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">
+                    Output & activity
+                  </div>
+                  <div className="text-[10px] text-white/30">
+                    {logs.length} log entr{logs.length === 1 ? 'y' : 'ies'}
+                  </div>
                 </div>
-                <div className="flex-1 min-h-0 overflow-y-auto font-mono text-xs space-y-0.5">
+                <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-2.5 font-mono text-xs space-y-1">
                   {transcript && (
-                    <div className="text-[#8b83ff] whitespace-pre-wrap">
-                      &gt; {transcript}
+                    <div className="rounded-md border border-[#635bff]/25 bg-[#635bff]/10 px-2 py-1.5 text-[#d7d2ff] whitespace-pre-wrap">
+                      <span className="mr-1 text-white/40">Voice:</span>
+                      {transcript}
                     </div>
                   )}
                   {logs.map((log, i) => (
                     <div
                       key={i}
-                      className="text-white/60 leading-relaxed whitespace-pre-wrap"
+                      className={`whitespace-pre-wrap leading-relaxed ${
+                        log.startsWith('ERROR')
+                          ? 'text-red-300/90'
+                          : log.startsWith('>')
+                            ? 'text-[#b9ffcf]/85'
+                            : 'text-white/65'
+                      }`}
                     >
                       {log}
                     </div>
                   ))}
                   {!logs.length && !transcript && (
-                    <div className="text-white/25">
-                      Press Speak, say a command, then press Stop &amp; send.
-                      Agent output and errors appear here.
+                    <div className="flex h-full min-h-[90px] items-center justify-center text-center text-white/35">
+                      <div>
+                        <div className="mb-1 text-sm text-white/55">No output yet</div>
+                        <div>Press <span className="text-white/60">Speak</span> or run a file to see results here.</div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1834,7 +1915,7 @@ function CodeSpaceShell({
 
             {panelTab === 'terminal' && (
               <div
-                className="flex flex-col h-full min-h-0 font-mono text-xs"
+                className="flex h-full min-h-0 flex-col gap-2 font-mono text-xs"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === 'ArrowUp') {
@@ -1851,29 +1932,38 @@ function CodeSpaceShell({
                   }
                 }}
               >
-                <div className="text-white/40 shrink-0">
-                  Leo sandbox terminal
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold uppercase tracking-wider text-white/45">
+                    Sandbox terminal
+                  </span>
+                  <span className="text-white/30">↑ ↓ navigate logs</span>
                 </div>
                 <div
-                  className="flex-1 min-h-0 overflow-y-auto text-white/55 space-y-0.5 mt-1"
+                  className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-white/10 bg-[#0d111a] p-2.5 text-white/70 space-y-0.5"
                   role="dialog"
                   aria-label="Terminal log"
                 >
                   {logs.map((log, i) => (
                     <div
                       key={i}
-                      className={
+                      className={`whitespace-pre-wrap rounded px-1.5 py-0.5 ${
                         i === activeLog
-                          ? 'whitespace-pre-wrap bg-[#635bff]/20'
-                          : 'whitespace-pre-wrap'
-                      }
+                          ? 'bg-[#635bff]/20 text-white'
+                          : log.startsWith('ERROR')
+                            ? 'text-red-300/90'
+                            : ''
+                      }`}
                     >
+                      <span className="mr-2 text-white/25 select-none">$</span>
                       {log}
                     </div>
                   ))}
                   {!logs.length && (
-                    <div className="text-white/25">
-                      $ Run a file to see its output here.
+                    <div className="flex h-full min-h-[90px] items-center justify-center text-center text-white/35">
+                      <div>
+                        <div className="mb-1 text-sm text-white/55">Terminal is ready</div>
+                        <div>Run the active file to stream execution output here.</div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1881,30 +1971,43 @@ function CodeSpaceShell({
             )}
 
             {panelTab === 'problems' && (
-              <div className="h-full font-mono text-xs">
-                <div className="text-white/40 mb-1">Problems</div>
-                <div className="text-white/25">No problems detected.</div>
+              <div className="h-full text-xs">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/45">
+                  Problems
+                </div>
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-emerald-100/80">
+                  <div className="font-medium text-emerald-200">No problems detected</div>
+                  <div className="mt-1 text-[11px] text-emerald-100/55">
+                    Lint, runtime, and command issues will appear here when available.
+                  </div>
+                </div>
               </div>
             )}
 
             {panelTab === 'voice' && (
               <div className="flex h-full min-h-0 flex-col gap-2">
-                <div className="flex flex-wrap items-center gap-3 shrink-0">
-                  <VoiceStatus voiceStatus={voiceStatus} />
-                  <PipelineVisualizer
-                    sttStatus={sttStatus}
-                    agentStatus={agentStatus}
-                    ttsStatus={ttsStatus}
-                  />
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <VoiceStatus voiceStatus={voiceStatus} />
+                    <PipelineVisualizer
+                      sttStatus={sttStatus}
+                      agentStatus={agentStatus}
+                      ttsStatus={ttsStatus}
+                    />
+                  </div>
+                  <div className="text-[10px] text-white/35">
+                    Speak, type, and review Leo&apos;s replies
+                  </div>
                 </div>
 
-                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+                <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-2.5 space-y-2">
                   {messages.length === 0 && (
-                    <p className="text-xs text-white/25">
-                      Talk to Leo: press Speak, say something, then Stop &amp;
-                      send. You can also type below if the microphone is
-                      unavailable.
-                    </p>
+                    <div className="flex h-full min-h-[90px] items-center justify-center text-center text-xs text-white/35">
+                      <div>
+                        <div className="mb-1 text-sm text-white/55">Voice & chat</div>
+                        <div>Press <span className="text-white/60">Speak</span> or type below to ask Leo to create, edit, or explain code.</div>
+                      </div>
+                    </div>
                   )}
                   {messages.map((message) => (
                     <div
@@ -1912,13 +2015,13 @@ function CodeSpaceShell({
                       className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs whitespace-pre-wrap ${
+                        className={`max-w-[88%] rounded-xl px-3 py-2 text-xs whitespace-pre-wrap shadow-sm ${
                           message.role === 'user'
-                            ? 'bg-[#635bff]/20 text-white/85'
-                            : 'bg-white/[0.06] text-white/70'
+                            ? 'bg-[#635bff]/25 text-white/90 border border-[#635bff]/30'
+                            : 'bg-white/[0.06] text-white/75 border border-white/10'
                         }`}
                       >
-                        <div className="mb-0.5 text-[9px] uppercase tracking-wider opacity-45">
+                        <div className="mb-1 text-[9px] uppercase tracking-wider opacity-45">
                           {message.role === 'user' ? 'You' : 'Leo'}
                         </div>
                         {message.text}
@@ -1932,19 +2035,19 @@ function CodeSpaceShell({
                     event.preventDefault()
                     await sendTextCommand()
                   }}
-                  className="flex shrink-0 items-center gap-2"
+                  className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-2"
                 >
                   <input
                     value={commandInput}
                     onChange={(event) => setCommandInput(event.target.value)}
                     placeholder="Type a message for Leo…"
                     aria-label="Message Leo"
-                    className="flex-1 rounded-md border border-white/10 bg-black/25 px-2.5 py-1.5 text-xs text-white placeholder:text-white/25 focus:border-[#635bff] focus:outline-none"
+                    className="flex-1 rounded-md border border-white/10 bg-black/25 px-3 py-2 text-xs text-white placeholder:text-white/30 focus:border-[#635bff] focus:outline-none"
                   />
                   <button
                     type="submit"
                     disabled={!commandInput.trim()}
-                    className="rounded-md bg-[#635bff] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#7c6cff] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md bg-[#635bff] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-[#7c6cff] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Send
                   </button>
