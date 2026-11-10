@@ -1492,14 +1492,14 @@ function CodeSpaceShell({
   const fileCount = files.filter((entry) => entry.kind === 'file').length
   const dirCount = files.filter((entry) => entry.kind === 'dir').length
   return (
-    <main className="h-screen w-screen overflow-hidden flex flex-col bg-[#1e1e1e] text-white">
+    <main className="h-screen w-screen overflow-hidden flex flex-col bg-[var(--ide-bg)] text-white">
       {/* ===== Title bar ===== */}
-      <header className="ide-titlebar flex items-center justify-between gap-3 px-3 h-10 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-5 h-5 rounded bg-[#635bff] flex items-center justify-center shrink-0">
+      <header className="ide-titlebar flex items-center justify-between gap-3 px-3 h-11 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#635bff] to-[#8b83ff] flex items-center justify-center shrink-0 shadow-[0_0_0_1px_rgba(255,255,255,0.12)]">
             <svg
-              width="10"
-              height="10"
+              width="11"
+              height="11"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -1512,13 +1512,15 @@ function CodeSpaceShell({
               <rect x="9" y="2" width="6" height="13" rx="3" />
             </svg>
           </div>
-          <span className="text-xs font-semibold tracking-tight truncate">
-            Leo Voice Workspace
-          </span>
-          <span className="hidden md:inline text-[11px] text-white/30 truncate max-w-56">
-            {activeFile || 'no file open'} · {fileCount} files
-            {dirCount ? `, ${dirCount} folders` : ''}
-          </span>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold tracking-tight truncate text-white/95">
+              Leo Voice Workspace
+            </div>
+            <div className="hidden md:block text-[10px] text-white/40 truncate max-w-64">
+              {activeFile || 'No file open'} · {fileCount} files
+              {dirCount ? `, ${dirCount} folders` : ''} · Voice-first coding
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
@@ -1538,10 +1540,10 @@ function CodeSpaceShell({
           <VoiceStatus voiceStatus={voiceStatus} />
           <button
             onClick={toggleRecording}
-            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border transition-all ${
               recording
-                ? 'bg-red-500/20 text-red-300 border-red-500/40 hover:bg-red-500/30'
-                : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
+                ? 'bg-red-500/20 text-red-200 border-red-500/40 hover:bg-red-500/30 shadow-[0_0_0_1px_rgba(239,68,68,0.15)]'
+                : 'bg-[#635bff]/20 text-[#e9e7ff] border-[#635bff]/35 hover:bg-[#635bff]/30 hover:border-[#635bff]/50'
             }`}
             title={
               recording ? 'Stop and send the command' : 'Record a voice command'

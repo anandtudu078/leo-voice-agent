@@ -242,24 +242,46 @@ export function EditorArea({
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-white/30">
-          <svg
-            width="40"
-            height="40"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <path d="M14 2v6h6" />
-          </svg>
-          <p className="text-sm">No file open</p>
-          <p className="text-xs">
-            Pick a file in the Explorer, or speak a command.
-          </p>
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-[#635bff]/15 text-[#c9c4ff]">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+              </svg>
+            </div>
+            <h2 className="text-lg font-semibold text-white">Welcome to Leo Voice IDE</h2>
+            <p className="mt-1 text-sm text-white/55">
+              Open a file, import a folder from your system, or use voice to create and edit code.
+            </p>
+            <div className="mt-5 grid gap-2 text-left sm:grid-cols-3">
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <div className="text-xs font-medium text-white/80">1. Open or create</div>
+                <div className="mt-1 text-[11px] text-white/45">Use Explorer to open files or import a local folder.</div>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <div className="text-xs font-medium text-white/80">2. Speak or type</div>
+                <div className="mt-1 text-[11px] text-white/45">Press Speak or chat with Leo to generate and edit code.</div>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <div className="text-xs font-medium text-white/80">3. Run & iterate</div>
+                <div className="mt-1 text-[11px] text-white/45">Save, run in sandbox, and refine with fast feedback.</div>
+              </div>
+            </div>
+            <div className="mt-4 text-[11px] text-white/35">
+              Shortcuts: <span className="rounded bg-white/5 px-1.5 py-0.5">Ctrl+S</span> save · <span className="rounded bg-white/5 px-1.5 py-0.5">Ctrl+Enter</span> run · <span className="rounded bg-white/5 px-1.5 py-0.5">Ctrl+J</span> panel
+            </div>
+          </div>
         </div>
       )}
     </div>
