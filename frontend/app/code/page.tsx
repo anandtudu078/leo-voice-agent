@@ -254,6 +254,7 @@ function CodeSpaceShell({
   const lastUserGoalRef = useRef('')
   const skipNextAutoParseRef = useRef<string | null>(null)
   const explainedPathsRef = useRef<Set<string>>(new Set())
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     pendingExplanationRef.current = pendingExplanation
@@ -1000,6 +1001,141 @@ function CodeSpaceShell({
     }
   }
 
+  const shouldSkipImportPath = (path: string) => {
+    const parts = path.split('/').filter(Boolean)
+    const skip = new Set([
+      '.git',
+      'node_modules',
+      '__pycache__',
+      '.venv',
+      'venv',
+      '.next',
+      '.idea',
+      '.vscode',
+      'dist',
+      'build',
+    ])
+    return parts.some((p) => skip.has(p))
+  }
+
+  const isLikelyBinary = (bytes: Uint8Array) => {
+    const sample = bytes.subarray(0, Math.min(bytes.length, 512))
+    let suspicious = 0
+    for (let i = 0; i < sample.length; i++) {
+      const b = sample[i]
+      if (b === 0) return true
+      if (b < 7 || (b > 13 && b < 32) || b === 127) suspicious++
+    }
+    return sample.length > 0 && suspicious / sample.length > 0.3
+  }
+
+  const uploadLocalFiles = async (
+    entries: Array<{ path: string; file: File }>,
+  ) => {
+    const filtered = entries.filter(
+      (e) => e.path && !shouldSkipImportPath(e.path),
+    )
+    if (!filtered.length) {
+      pushMessage('leo', 'No files to import from the selected folder.')
+      return
+    }
+    setLoading(true)
+    pushLog(`> Importing ${filtered.length} file(s) from system folder…`)
+    let imported = 0
+    let skipped = 0
+    let lastFiles: WorkspaceEntry[] | null = null
+    try {
+      for (const entry of filtered) {
+        try {
+          const buf = new Uint8Array(await entry.file.arrayBuffer())
+          if (isLikelyBinary(buf)) {
+            skipped++
+            continue
+          }
+          const text = new TextDecoder('utf-8', { fatal: false }).decode(buf)
+          lastFiles = await writeWorkspaceFile(entry.path, text)
+          imported++
+        } catch {
+          skipped++
+        }
+      }
+      if (lastFiles) setFiles(lastFiles)
+      else setFiles(await listWorkspace())
+      pushLog(
+        `> Imported ${imported} file(s)${skipped ? `, skipped ${skipped}` : ''}.`,
+      )
+      pushMessage(
+        'leo',
+        `Imported ${imported} file(s) from the selected folder${skipped ? ` (skipped ${skipped} binary/unreadable)` : ''}.`,
+      )
+      if (imported > 0) setSidebarOpen(true)
+    } catch (err) {
+      pushLog(`ERROR: could not import folder — ${describeError(err)}`)
+      pushMessage('leo', `Could not import folder: ${describeError(err)}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const openSystemFolder = async () => {
+    const picker = (window as any).showDirectoryPicker as
+      | undefined
+      | (() => Promise<any>)
+    if (picker) {
+      try {
+        const dirHandle = await (window as any).showDirectoryPicker({
+          mode: 'read',
+        })
+        const collected: Array<{ path: string; file: File }> = []
+        const walk = async (handle: any, prefix: string) => {
+          for await (const [name, child] of handle.entries()) {
+            const rel = prefix ? `${prefix}/${name}` : name
+            if (shouldSkipImportPath(rel)) continue
+            if (child.kind === 'file') {
+              try {
+                const file = await child.getFile()
+                collected.push({ path: rel, file })
+              } catch {
+                // ignore unreadable
+              }
+            } else if (child.kind === 'directory') {
+              await walk(child, rel)
+            }
+            if (collected.length >= 500) break
+          }
+        }
+        await walk(dirHandle, '')
+        await uploadLocalFiles(collected)
+        return
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return
+        pushLog(
+          `> Folder picker API unavailable/failed, using fallback: ${describeError(err)}`,
+        )
+      }
+    }
+    folderInputRef.current?.click()
+  }
+
+  const onFolderInputChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const fileList = e.target.files
+    if (!fileList || fileList.length === 0) return
+    const filesArr = Array.from(fileList)
+    const collected = filesArr.map((f) => {
+      const rel =
+        (f as any).webkitRelativePath && String((f as any).webkitRelativePath)
+          ? String((f as any).webkitRelativePath)
+          : f.name
+      const parts = rel.split('/').filter(Boolean)
+      const path = parts.length > 1 ? parts.slice(1).join('/') : rel
+      return { path, file: f }
+    })
+    e.target.value = ''
+    await uploadLocalFiles(collected)
+  }
+
   const deleteEntry = async (path: string) => {
     if (!window.confirm(`Delete ${baseName(path)}? This cannot be undone.`))
       return
@@ -1477,6 +1613,7 @@ function CodeSpaceShell({
             onOpenFile={(path) => void openFile(path)}
             onCreateFile={(dir) => void createFile(dir)}
             onCreateFolder={(dir) => void createFolder(dir)}
+            onOpenFolder={() => void openSystemFolder()}
             onRename={(path) => void renameEntry(path)}
             onDelete={(path) => void deleteEntry(path)}
             onRefresh={() => void refreshTree()}
@@ -1829,6 +1966,16 @@ function CodeSpaceShell({
       {showSuggestion && panelTab !== 'voice' && (
         <ContextAwarePrompting onClose={() => setShowSuggestion(false)} />
       )}
+      <input
+        ref={folderInputRef}
+        type="file"
+        // @ts-expect-error webkitdirectory is non-standard but widely supported
+        webkitdirectory="true"
+        directory=""
+        multiple
+        className="hidden"
+        onChange={(e) => void onFolderInputChange(e)}
+      />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
@@ -1844,6 +1991,12 @@ function CodeSpaceShell({
             label: 'New Folder',
             description: 'Create a folder in your workspace',
             run: () => void createFolder(''),
+          },
+          {
+            key: 'open-folder',
+            label: 'Open Folder',
+            description: 'Import a folder from your system into the workspace',
+            run: () => void openSystemFolder(),
           },
           {
             key: 'save',

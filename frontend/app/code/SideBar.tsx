@@ -14,6 +14,7 @@ interface SideBarProps {
   onOpenFile: (path: string) => void
   onCreateFile: (dir: string) => void
   onCreateFolder: (dir: string) => void
+  onOpenFolder: () => void
   onRename: (path: string) => void
   onDelete: (path: string) => void
   onRefresh: () => void
@@ -169,6 +170,25 @@ function IconRefresh() {
   )
 }
 
+function IconOpenFolder() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      <path d="M12 11v6" />
+      <path d="m9 14 3-3 3 3" />
+    </svg>
+  )
+}
+
 export function SideBar({
   files,
   activeFile,
@@ -179,6 +199,7 @@ export function SideBar({
   onOpenFile,
   onCreateFile,
   onCreateFolder,
+  onOpenFolder,
   onRename,
   onDelete,
   onRefresh,
@@ -357,6 +378,14 @@ export function SideBar({
               >
                 <IconFolderPlus />
                 Folder
+              </button>
+              <button
+                onClick={onOpenFolder}
+                className="w-6 h-6 flex items-center justify-center text-white/50 hover:bg-white/5 hover:text-white rounded transition-colors"
+                title="Open Folder from System"
+                aria-label="Open Folder from System"
+              >
+                <IconOpenFolder />
               </button>
               <button
                 onClick={onRefresh}
