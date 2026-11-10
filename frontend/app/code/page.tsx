@@ -263,6 +263,7 @@ function CodeSpaceShell({
   }, [lastUserGoal])
 
   const messageIdRef = useRef(0)
+  const streamingLeoIdRef = useRef<number | null>(null)
   const offlineRef = useRef(false)
   const unmountingRef = useRef(false)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -546,7 +547,12 @@ function CodeSpaceShell({
             break
           case 'ready':
             setVoiceStatus('ready')
-            if (Array.isArray(msg.files)) setFiles(msg.files)
+            if (Array.isArray(msg.files)) {
+              if (msg.files.length > 0) {
+                setFiles(msg.files)
+              }
+              // If backend returns empty files, keep existing files (don't wipe starter/local files)
+            }
             break
           case 'turn-started':
             setVoiceStatus('processing')
@@ -645,7 +651,7 @@ function CodeSpaceShell({
           case 'logs': {
             const lines: string[] = Array.isArray(msg.logs) ? msg.logs : []
             setLogs((prev) => [...prev, ...lines])
-            if (Array.isArray(msg.files)) setFiles(msg.files)
+            if (Array.isArray(msg.files) && msg.files.length > 0) setFiles(msg.files)
             // Safety net: when the backend saves a file (including from agent/tool flows),
             // re-read it so the editor/codespace stays in sync with disk.
             try {
@@ -669,10 +675,43 @@ function CodeSpaceShell({
             setVoiceStatus('ready')
             break
           }
+          case 'reply_delta': {
+            const delta = String(msg.delta || '')
+            if (!delta) break
+            setVoiceStatus('ready')
+            setAgentStatus('processing')
+            setMessages((prev) => {
+              const sid = streamingLeoIdRef.current
+              if (sid != null) {
+                return prev.map((m) =>
+                  m.id === sid ? { ...m, text: m.text + delta } : m,
+                )
+              }
+              const id = ++messageIdRef.current
+              streamingLeoIdRef.current = id
+              return [
+                ...prev.slice(-59),
+                { id, role: 'leo' as const, text: delta },
+              ]
+            })
+            break
+          }
           case 'reply': {
-            // Fast text path: show reply immediately while TTS is still generating.
+            // Finalize: if streamed, update the in-progress message; otherwise show immediately.
             const text = String(msg.text || '')
-            if (text) {
+            const streamed =
+              Boolean(msg.streamed) && streamingLeoIdRef.current != null
+            if (streamed) {
+              const sid = streamingLeoIdRef.current
+              streamingLeoIdRef.current = null
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === sid ? { ...m, text: text || m.text } : m,
+                ),
+              )
+              if (text) setLogs((prev) => [...prev, `{ Agent says: ${text} }`])
+            } else if (text) {
+              streamingLeoIdRef.current = null
               setLogs((prev) => [...prev, `{ Agent says: ${text} }`])
               pushMessage('leo', text)
             }

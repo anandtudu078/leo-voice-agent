@@ -21,6 +21,7 @@ import logging
 import os
 import secrets
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -598,6 +599,7 @@ async def _generate_reply(
     transcript: str,
     history: list[dict] | None = None,
     workspace: Path | None = None,
+    on_delta: Callable[[str], None] | None = None,
 ) -> str:
     """Return Leo's spoken reply, with earlier turns as context."""
     system = SYSTEM_INSTRUCTION
@@ -624,6 +626,7 @@ async def _generate_reply(
             gemini_model=GEMINI_MODEL,
             task="reply",
             prefer_fast=True,
+            on_delta=on_delta,
         )
         text = result[0] if isinstance(result, tuple) else str(result)
         meta = result[2] if isinstance(result, tuple) and len(result) > 2 else {}
@@ -700,11 +703,39 @@ async def websocket_process_voice(websocket: WebSocket):
 
         await websocket.send_json({"type": "turn-started"})
         await websocket.send_json({"type": "waiting", "message": "Thinking..."})
+        loop = asyncio.get_running_loop()
+        delta_q: asyncio.Queue[str | None] = asyncio.Queue()
+        streamed = False
+
+        def _on_delta(chunk: str) -> None:
+            nonlocal streamed
+            if chunk:
+                streamed = True
+                try:
+                    loop.call_soon_threadsafe(delta_q.put_nowait, chunk)
+                except Exception:
+                    pass
+
+        async def _drain_deltas():
+            while True:
+                item = await delta_q.get()
+                if item is None:
+                    break
+                try:
+                    await websocket.send_json({"type": "reply_delta", "delta": item})
+                except Exception:
+                    break
+
+        drain_task = asyncio.create_task(_drain_deltas())
         try:
             reply = await _generate_reply(
-                transcript, history=history, workspace=workspace
+                transcript, history=history, workspace=workspace, on_delta=_on_delta
             )
         except HTTPException as exc:
+            try:
+                await delta_q.put(None); await drain_task
+            except Exception:
+                pass
             tl = (transcript or "").lower()
             if _re.search(r"\b(run|execute|start)\b", tl):
                 m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", transcript or "")
@@ -724,6 +755,10 @@ async def websocket_process_voice(websocket: WebSocket):
             await websocket.send_json({"type": "error", "error": str(exc.detail)})
             await websocket.send_json({"type": "listening", "message": "I'm listening now."})
             return
+        try:
+            await delta_q.put(None); await drain_task
+        except Exception:
+            pass
 
         # If the user asked to write/create/update code and the agent replied with a
         # fenced code block, persist it to the target file (coding-agent behavior) and
@@ -764,8 +799,8 @@ async def websocket_process_voice(websocket: WebSocket):
             # Never fail the conversational turn because of auto-save.
             pass
 
-        # Send text immediately so the UI responds fast; synthesize/play audio after.
-        await websocket.send_json({"type": "reply", "text": reply, "tts": "pending"})
+        # Finalize streamed text (or send full reply), then synthesize/play audio after.
+        await websocket.send_json({"type": "reply", "text": reply, "tts": "pending", "streamed": streamed})
         history.extend(
             [
                 {"role": "user", "text": transcript},
@@ -794,6 +829,7 @@ async def websocket_process_voice(websocket: WebSocket):
             }
         )
         await websocket.send_json({"type": "listening", "message": "I'm listening now."})
+
 
     async def handle_audio(audio: bytes) -> None:
         try:
