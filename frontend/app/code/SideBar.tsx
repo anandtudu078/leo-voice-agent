@@ -406,14 +406,25 @@ export function SideBar({
             )}
 
             {!loading && files.length === 0 && (
-              <div className="p-3 text-xs text-white/35 leading-relaxed">
-                No files yet.
-                <button
-                  onClick={() => onCreateFile('')}
-                  className="mt-2 block text-[#8b83ff] hover:text-white transition-colors"
-                >
-                  Create your first file
-                </button>
+              <div className="mx-2 mt-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-relaxed text-white/55">
+                <div className="mb-1 text-sm font-medium text-white/80">Your workspace is empty</div>
+                <p className="mb-3 text-white/45">
+                  Create a file, make a folder, or import a folder from your system to get started.
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => onCreateFile('')}
+                    className="rounded-md bg-[#635bff]/20 px-2.5 py-1.5 text-left text-[#d7d2ff] hover:bg-[#635bff]/30 transition-colors"
+                  >
+                    + New file
+                  </button>
+                  <button
+                    onClick={onOpenFolder}
+                    className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-left text-white/75 hover:bg-white/10 hover:text-white transition-colors"
+                  >
+                    Open folder from system
+                  </button>
+                </div>
               </div>
             )}
 
