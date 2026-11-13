@@ -44,9 +44,12 @@ from db import init_db, ping_database
 from edits import (
     EditError,
     NothingToUndo,
+    RevisionNotFound,
     StaleEditError,
     apply_edit,
     build_proposal,
+    build_restore_proposal,
+    list_edit_history,
     propose_edit,
     undo_last_edit,
 )
@@ -160,6 +163,10 @@ class ApplyEditRequest(BaseModel):
 
 class UndoEditRequest(BaseModel):
     path: str = ""
+
+
+class RestoreEditRequest(BaseModel):
+    revision_id: int
 
 
 def _email_signin_response(user: dict) -> JSONResponse:
@@ -480,6 +487,8 @@ async def get_capabilities():
                 {"type": "accept_edit", "path": "apply the pending diff"},
                 {"type": "reject_edit", "path": "discard the pending diff"},
                 {"type": "undo_edit", "path": "restore the last applied edit"},
+                {"type": "history", "path": "list recent edits for a file"},
+                {"type": "restore_edit", "revision_id": 1},
             ],
             "server_to_client": [
                 {"type": "transcript", "text": "transcribed text"},
@@ -488,7 +497,8 @@ async def get_capabilities():
                 {"type": "assigned", "tool": "", "file": ""},
                 {"type": "logs", "logs": []},
                 {"type": "edit-proposal", "path": "", "summary": "", "diff": ""},
-                {"type": "edit-result", "ok": True, "action": "apply|reject|undo"},
+                {"type": "edit-result", "ok": True, "action": "apply|reject|undo|restore"},
+                {"type": "edit-history", "path": "", "revisions": []},
                 {"type": "turn-started"},
                 {"type": "waiting", "message": ""},
                 {"type": "listening", "message": ""},
@@ -1241,6 +1251,62 @@ async def websocket_process_voice(websocket: WebSocket):
             elif msg_type == "undo_edit":
                 await perform_undo(path or last_opened_path)
 
+            elif msg_type == "history":
+                history_path = path or last_opened_path or None
+                revisions = await asyncio.to_thread(
+                    list_edit_history,
+                    workspace_id=workspace_id,
+                    path=history_path,
+                )
+                await websocket.send_json(
+                    {
+                        "type": "edit-history",
+                        "path": history_path or "",
+                        "revisions": revisions,
+                        "signed_in": workspace_id is not None,
+                    }
+                )
+
+            elif msg_type == "restore_edit":
+                try:
+                    revision_id = int(payload.get("revision_id"))
+                except (TypeError, ValueError):
+                    await websocket.send_json(
+                        {"type": "error", "error": "A valid revision_id is required."}
+                    )
+                    continue
+                try:
+                    proposal = await asyncio.to_thread(
+                        build_restore_proposal,
+                        executor=workspace_executor,
+                        workspace=workspace,
+                        workspace_id=workspace_id,
+                        revision_id=revision_id,
+                    )
+                except EditError as exc:
+                    await websocket.send_json({"type": "error", "error": str(exc)})
+                    continue
+                if not proposal["changed"]:
+                    await websocket.send_json(
+                        {
+                            "type": "edit-result",
+                            "ok": True,
+                            "action": "restore",
+                            "path": proposal["path"],
+                            "message": proposal["summary"],
+                        }
+                    )
+                    continue
+                pending_edit = proposal
+                await websocket.send_json({"type": "edit-proposal", **proposal})
+                await websocket.send_json(
+                    {
+                        "type": "logs",
+                        "logs": [f"> Prepared a restore of {proposal['path']}"],
+                        "files": _workspace_files(workspace),
+                    }
+                )
+
             elif msg_type in {"create_file", "write_file"}:
                 code = str(payload.get("code") or "")
                 existing = _read_existing(path)
@@ -1802,6 +1868,39 @@ async def apply_edit_endpoint(request: Request, payload: ApplyEditRequest):
     except EditError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {**result, "files": _workspace_files(workspace)}
+
+
+@app.get("/api/agent/history")
+async def edit_history_endpoint(request: Request, path: str = ""):
+    """List recent agent edits for a file, newest first."""
+    _workspace, workspace_id = await _workspace_context(request.state.session)
+    revisions = await asyncio.to_thread(
+        list_edit_history, workspace_id=workspace_id, path=path.strip() or None
+    )
+    return {
+        "path": path,
+        "revisions": revisions,
+        "signed_in": workspace_id is not None,
+    }
+
+
+@app.post("/api/agent/restore-preview")
+async def restore_preview_endpoint(request: Request, payload: RestoreEditRequest):
+    """Build a reviewable diff back to the version before an earlier edit."""
+    workspace, workspace_id = await _workspace_context(request.state.session)
+    try:
+        proposal = await asyncio.to_thread(
+            build_restore_proposal,
+            executor=workspace_executor,
+            workspace=workspace,
+            workspace_id=workspace_id,
+            revision_id=payload.revision_id,
+        )
+    except RevisionNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return proposal
 
 
 @app.post("/api/agent/undo")

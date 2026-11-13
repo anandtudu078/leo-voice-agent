@@ -27,10 +27,11 @@ Leo Voice Agent is a **free, forever** voice-driven IDE where you can:
 | **Edit file command** | ✅ Implemented |
 | **Opt-in code explanation walkthrough (v1)** | ✅ Implemented |
 | **Reviewable diff edits + undo** | ✅ Implemented |
+| **Per-file edit history + restore preview** | ✅ Implemented |
 | VS Code-style terminal navigation (ArrowUp/Down) | ✅ Implemented |
 | Keep-alive workflow (10min health ping) | ✅ Working |
 | README updated | ✅ Updated |
-| Backend tests | ✅ `pytest` (38 passing in current suite) |
+| Backend tests | ✅ `pytest` (58 passing in current suite) |
 
 ## 🏗️ Architecture
 
@@ -116,6 +117,7 @@ Leo never blind-writes over an existing file. When a voice or text request targe
 2. **Review:** choose **Accept edit** or **Reject**, or say **“apply”** / **“reject”**. Nothing is written until you accept.
 3. **Stale-write protection:** if the file changed since the proposal was generated, the edit is rejected instead of clobbering newer content.
 4. **Undo:** use the **Undo** button or say **“undo that”** to restore the last applied agent edit. Each applied edit records a before/after revision in the database.
+5. **History:** open **History** to browse the latest 25 agent edits for the active file, newest first. Choosing **Restore** on an entry opens a diff back to the version before that edit, so you can step back multiple revisions without writing anything until you accept. Undone revisions stay visible with an `undone` label.
 
 The proposal prompt includes the active file, the recent conversation, and optional selected text, so follow-ups like “make it faster” or “change line 12” work without restating the file.
 
@@ -124,8 +126,10 @@ The proposal prompt includes the active file, the recent conversation, and optio
 - `POST /api/agent/propose-edit` — `{ path, transcript, selection?, history? }` → `{ path, old_code, new_code, diff, summary, added, removed, changed, provider }`; writes nothing.
 - `POST /api/agent/apply-edit` — `{ path, old_code, new_code, summary? }` → applies only if the file still matches `old_code` (409 otherwise).
 - `POST /api/agent/undo` — `{ path? }` → restores the newest un-undone edit for that file or workspace.
+- `GET /api/agent/history?path=` — returns recent revisions (`id`, `path`, `summary`, `created_at`, `undone_at`, `added`, `removed`) and whether the caller is signed in.
+- `POST /api/agent/restore-preview` — `{ revision_id }` → returns a reviewable diff back to the version before that edit; writes nothing.
 
-WebSocket clients can also use `edit-proposal` / `edit-result` events and send `accept_edit`, `reject_edit`, or `undo_edit`.
+WebSocket clients can also use `edit-proposal` / `edit-result` / `edit-history` events and send `accept_edit`, `reject_edit`, `undo_edit`, `history`, or `restore_edit`.
 
 ### Technical Features
 
@@ -134,7 +138,7 @@ WebSocket clients can also use `edit-proposal` / `edit-result` events and send `
 - `/api/parse-voice-command` - Gemini planner + regex fallbacks
 - `/api/explain-code` - Gemini-generated structured walkthrough steps with deterministic fallback
 - Autonomous mode checks `creationMode === 'none' && folderSelectMode === 'none'`
-- Backend test suite: 38 passing tests (`cd backend && pytest -q`, current workspace config)
+- Backend test suite: 58 passing tests (`cd backend && pytest -q`, current workspace config)
 - Frontend production build / TypeScript checks pass (`cd frontend && npm run build`)
 
 ## 🏁 Quick Start
@@ -243,7 +247,7 @@ Checks `/api/health`, `/openapi.json`, and `/ws/process-voice` handshake.
 | **Phase 3** | Hands-free recording, voice session persistence, enhanced execution results |
 | **Phase 4** | ✅ Autonomous voice commands, edit file command, terminal navigation |
 | **Phase 5** | ✅ Opt-in line-by-line code explanation walkthrough (v1, text-only) |
-| **Phase 6** | ✅ Context-aware diff proposals, accept/reject review, stale-write protection, undo |
+| **Phase 6** | ✅ Context-aware diff proposals, accept/reject review, stale-write protection, undo, per-file history and restore previews |
 | **Future** | TTS narration for explanations, language-aware/AST chunking, explanation tests, delete file command, multi-file operations, git integration |
 
 ## 🐛 Known Issues

@@ -159,6 +159,57 @@ def record_edit_revision(
         }
 
 
+def list_edit_revisions(
+    workspace_id: int, path: str | None = None, limit: int = 25
+) -> list[dict]:
+    """Return recent revisions for a workspace, newest first."""
+    with session_scope() as session:
+        query = select(EditRevision).where(
+            EditRevision.workspace_id == workspace_id
+        )
+        if path:
+            query = query.where(EditRevision.path == path)
+        revisions = session.scalars(
+            query.order_by(
+                EditRevision.created_at.desc(), EditRevision.id.desc()
+            ).limit(limit)
+        ).all()
+        return [
+            {
+                "id": revision.id,
+                "path": revision.path,
+                "before_content": revision.before_content,
+                "after_content": revision.after_content,
+                "summary": revision.summary,
+                "created_at": _iso(revision.created_at),
+                "undone_at": _iso(revision.undone_at),
+            }
+            for revision in revisions
+        ]
+
+
+def get_edit_revision(workspace_id: int, revision_id: int) -> dict | None:
+    """Return one revision scoped to its owning workspace."""
+    with session_scope() as session:
+        revision = session.scalar(
+            select(EditRevision).where(
+                EditRevision.id == revision_id,
+                EditRevision.workspace_id == workspace_id,
+            )
+        )
+        if revision is None:
+            return None
+        return {
+            "id": revision.id,
+            "path": revision.path,
+            "before_content": revision.before_content,
+            "after_content": revision.after_content,
+            "summary": revision.summary,
+            "created_at": _iso(revision.created_at),
+            "undone_at": _iso(revision.undone_at),
+        }
+
+
 def latest_edit_revision(workspace_id: int, path: str | None = None) -> dict | None:
     """Return the newest revision that has not been undone yet."""
     with session_scope() as session:
