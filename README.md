@@ -2,7 +2,29 @@
 
 A voice-driven full-stack development environment where you can chat with Leo to create files, folders, run scripts, and edit code using natural language commands.
 
-![Leo Voice Agent](https://i.imgur.com/ExampleLeo.png)
+## Interface
+
+### Landing
+
+![Leo landing page](docs/assets/landing.png)
+
+### Workspace
+
+The code workspace includes a file explorer, tabbed editor, terminal/output panel, and voice controls.
+
+![Leo code workspace](docs/assets/workspace.png)
+
+### Reviewable edits
+
+Agent edits open as a diff proposal so changes can be reviewed before anything is written.
+
+![Reviewable edit diff](docs/assets/edit-review.png)
+
+### Edit history & restore
+
+Each file keeps a per-file history of agent revisions. Restoring an older entry opens a diff back to that version for review instead of overwriting immediately.
+
+![Per-file edit history](docs/assets/edit-history.png)
 
 ## 🚀 Overview
 
