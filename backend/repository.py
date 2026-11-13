@@ -6,12 +6,12 @@ return plain dicts so callers never hold a detached ORM instance.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, select
 
 from db import session_scope
-from models import FileSnapshot, User, VoiceTurn, Workspace
+from models import EditRevision, FileSnapshot, User, VoiceTurn, Workspace
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -130,6 +130,65 @@ def list_file_snapshots(workspace_id: int) -> list[dict]:
             }
             for row in rows
         ]
+
+
+# ---------------------------------------------------------------------------
+# Edit revisions (undo / per-file history)
+# ---------------------------------------------------------------------------
+
+
+def record_edit_revision(
+    workspace_id: int, path: str, before_content: str, after_content: str, summary: str = ""
+) -> dict:
+    """Store one applied edit so it can be undone later."""
+    with session_scope() as session:
+        revision = EditRevision(
+            workspace_id=workspace_id,
+            path=path,
+            before_content=before_content,
+            after_content=after_content,
+            summary=summary,
+        )
+        session.add(revision)
+        session.flush()
+        return {
+            "id": revision.id,
+            "path": revision.path,
+            "summary": revision.summary,
+            "created_at": _iso(revision.created_at),
+        }
+
+
+def latest_edit_revision(workspace_id: int, path: str | None = None) -> dict | None:
+    """Return the newest revision that has not been undone yet."""
+    with session_scope() as session:
+        query = select(EditRevision).where(
+            EditRevision.workspace_id == workspace_id,
+            EditRevision.undone_at.is_(None),
+        )
+        if path:
+            query = query.where(EditRevision.path == path)
+        revision = session.scalar(
+            query.order_by(EditRevision.created_at.desc(), EditRevision.id.desc())
+        )
+        if revision is None:
+            return None
+        return {
+            "id": revision.id,
+            "path": revision.path,
+            "before_content": revision.before_content,
+            "after_content": revision.after_content,
+            "summary": revision.summary,
+            "created_at": _iso(revision.created_at),
+        }
+
+
+def mark_edit_revision_undone(revision_id: int) -> None:
+    """Mark a revision as consumed so the next undo walks further back."""
+    with session_scope() as session:
+        revision = session.get(EditRevision, revision_id)
+        if revision is not None:
+            revision.undone_at = datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------------------------------

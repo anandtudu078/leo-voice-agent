@@ -70,6 +70,31 @@ class FileSnapshot(Base):
     workspace: Mapped[Workspace] = relationship(back_populates="files")
 
 
+class EditRevision(Base):
+    """A restorable snapshot taken when an agent-proposed edit is applied.
+
+    `before_content`/`after_content` make a one-step undo possible without
+    re-asking the model, and are a foundation for per-file history later.
+    """
+
+    __tablename__ = "edit_revisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    path: Mapped[str] = mapped_column(String(1024), index=True)
+    before_content: Mapped[str] = mapped_column(Text, default="")
+    after_content: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+    undone_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class VoiceTurn(Base):
     """One transcript -> reply exchange, kept for the command history panel."""
 
