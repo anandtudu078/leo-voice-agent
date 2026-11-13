@@ -205,6 +205,104 @@ class TestApplyAndUndo(EditTestCase):
             )
 
 
+class TestEditHistory(EditTestCase):
+    def _apply(self, new_code: str, summary: str) -> dict:
+        current = self.executor.read(self.workspace, self.path)
+        return edits.apply_edit(
+            executor=self.executor,
+            workspace=self.workspace,
+            workspace_id=self.workspace_id,
+            path=self.path,
+            old_code=current,
+            new_code=new_code,
+            summary=summary,
+        )
+
+    def test_history_is_newest_first_with_stats(self):
+        mid = "print('mid')\n"
+        first = self._apply(mid, "First change")
+        second = self._apply(self.after, "Second change")
+
+        history = edits.list_edit_history(
+            workspace_id=self.workspace_id, path=self.path
+        )
+        self.assertEqual(
+            [entry["id"] for entry in history],
+            [second["revision_id"], first["revision_id"]],
+        )
+        self.assertEqual(
+            [entry["summary"] for entry in history],
+            ["Second change", "First change"],
+        )
+        self.assertEqual((history[0]["added"], history[0]["removed"]), (1, 1))
+        self.assertIsNone(history[0]["undone_at"])
+        self.assertEqual(
+            edits.list_edit_history(
+                workspace_id=self.workspace_id, path="other.py"
+            ),
+            [],
+        )
+
+    def test_undo_is_reflected_in_history(self):
+        self._apply("print('mid')\n", "First change")
+        second = self._apply(self.after, "Second change")
+
+        edits.undo_last_edit(
+            executor=self.executor,
+            workspace=self.workspace,
+            workspace_id=self.workspace_id,
+            path=self.path,
+        )
+        history = edits.list_edit_history(
+            workspace_id=self.workspace_id, path=self.path
+        )
+        self.assertEqual(history[0]["id"], second["revision_id"])
+        self.assertIsNotNone(history[0]["undone_at"])
+
+    def test_restore_preview_targets_the_version_before_a_revision(self):
+        mid = "print('mid')\n"
+        first = self._apply(mid, "First change")
+        self._apply(self.after, "Second change")
+
+        proposal = edits.build_restore_proposal(
+            executor=self.executor,
+            workspace=self.workspace,
+            workspace_id=self.workspace_id,
+            revision_id=first["revision_id"],
+        )
+        self.assertEqual(proposal["old_code"], self.after)
+        self.assertEqual(proposal["new_code"], self.before)
+        self.assertEqual(proposal["restore_of"], first["revision_id"])
+        self.assertTrue(proposal["changed"])
+        # Previewing must not write anything.
+        self.assertEqual(
+            self.executor.read(self.workspace, self.path), self.after
+        )
+
+    def test_restore_preview_rejects_an_unknown_revision(self):
+        with self.assertRaises(edits.RevisionNotFound):
+            edits.build_restore_proposal(
+                executor=self.executor,
+                workspace=self.workspace,
+                workspace_id=self.workspace_id,
+                revision_id=2**31 - 1,
+            )
+
+    def test_history_is_scoped_to_one_workspace(self):
+        self._apply(self.after, "First change")
+        other_user = repository.get_or_create_user(unique_email())
+        other_workspace = repository.get_or_create_workspace(other_user["id"])
+        self.assertEqual(
+            edits.list_edit_history(
+                workspace_id=other_workspace, path=self.path
+            ),
+            [],
+        )
+
+    def test_anonymous_history_is_empty(self):
+        self.assertEqual(edits.list_edit_history(workspace_id=None), [])
+
+
 class TestEditEndpoints(unittest.TestCase):
     """Exercise the HTTP review loop with a signed-in test client."""
 
@@ -231,6 +329,68 @@ class TestEditEndpoints(unittest.TestCase):
             )
         except Exception:
             pass
+
+    def test_history_and_restore_endpoints(self):
+        proposal = edits.build_proposal(
+            self.path, self.before, self.after, "Bump the value"
+        )
+        applied = self.client.post(
+            "/api/agent/apply-edit",
+            json={
+                "path": self.path,
+                "old_code": proposal["old_code"],
+                "new_code": proposal["new_code"],
+                "summary": proposal["summary"],
+            },
+        )
+        self.assertEqual(applied.status_code, 200)
+
+        history = self.client.get(
+            "/api/agent/history", params={"path": self.path}
+        )
+        self.assertEqual(history.status_code, 200)
+        body = history.json()
+        self.assertTrue(body["signed_in"])
+        self.assertEqual(len(body["revisions"]), 1)
+        self.assertEqual(body["revisions"][0]["summary"], "Bump the value")
+
+        preview = self.client.post(
+            "/api/agent/restore-preview",
+            json={"revision_id": body["revisions"][0]["id"]},
+        )
+        self.assertEqual(preview.status_code, 200)
+        preview_body = preview.json()
+        self.assertEqual(preview_body["old_code"], self.after)
+        self.assertEqual(preview_body["new_code"], self.before)
+
+        restored = self.client.post(
+            "/api/agent/apply-edit",
+            json={
+                "path": self.path,
+                "old_code": preview_body["old_code"],
+                "new_code": preview_body["new_code"],
+                "summary": preview_body["summary"],
+            },
+        )
+        self.assertEqual(restored.status_code, 200)
+        read = self.client.get("/api/files/read", params={"path": self.path})
+        self.assertEqual(read.json()["content"], self.before)
+
+        history = self.client.get(
+            "/api/agent/history", params={"path": self.path}
+        ).json()
+        self.assertEqual(len(history["revisions"]), 2)
+        self.assertTrue(
+            history["revisions"][0]["summary"].startswith(
+                "Restore the version before"
+            )
+        )
+
+    def test_restore_preview_returns_404_for_unknown_revision(self):
+        response = self.client.post(
+            "/api/agent/restore-preview", json={"revision_id": 2**31 - 1}
+        )
+        self.assertEqual(response.status_code, 404)
 
     def test_propose_apply_and_undo_round_trip(self):
         proposal = edits.build_proposal(

@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # model would have to reproduce too much unrelated code.
 MAX_EDIT_CHARS = 24_000
 MAX_HISTORY_TURNS = 6
+MAX_HISTORY_ENTRIES = 25
 
 
 class EditError(Exception):
@@ -37,6 +38,10 @@ class StaleEditError(EditError):
 
 class NothingToUndo(EditError):
     """No un-applied revision exists for the requested workspace/file."""
+
+
+class RevisionNotFound(EditError):
+    """The requested revision does not belong to this workspace."""
 
 
 def _normalize_newlines(value: str, reference: str) -> str:
@@ -261,6 +266,72 @@ def apply_edit(
     }
 
 
+def list_edit_history(
+    *,
+    workspace_id: int | None,
+    path: str | None = None,
+    limit: int = MAX_HISTORY_ENTRIES,
+) -> list[dict]:
+    """Return compact history entries for a file (or the whole workspace)."""
+    if workspace_id is None:
+        return []
+    entries: list[dict] = []
+    for revision in repository.list_edit_revisions(workspace_id, path, limit):
+        added, removed = diff_stats(
+            revision["before_content"], revision["after_content"]
+        )
+        entries.append(
+            {
+                "id": revision["id"],
+                "path": revision["path"],
+                "summary": revision["summary"]
+                or f"Updated {revision['path']}",
+                "created_at": revision["created_at"],
+                "undone_at": revision["undone_at"],
+                "added": added,
+                "removed": removed,
+            }
+        )
+    return entries
+
+
+def build_restore_proposal(
+    *,
+    executor: SandboxExecutor,
+    workspace: Path,
+    workspace_id: int | None,
+    revision_id: int,
+) -> dict:
+    """Diff the current file against the state before `revision_id`.
+
+    The returned proposal still goes through the normal review/apply path, so
+    restoring an older version is explicit and undoable.
+    """
+    if workspace_id is None:
+        raise EditError("Sign in to restore an earlier version.")
+
+    revision = repository.get_edit_revision(workspace_id, revision_id)
+    if revision is None:
+        raise RevisionNotFound("That edit is no longer in this workspace's history.")
+
+    try:
+        current = executor.read(workspace, revision["path"])
+    except SandboxExecutionError as exc:
+        raise EditError(str(exc)) from exc
+
+    label = revision["summary"] or "that edit"
+    proposal = build_proposal(
+        revision["path"],
+        current,
+        revision["before_content"],
+        f"Restore the version before: {label}",
+    )
+    proposal["restore_of"] = revision["id"]
+    if not proposal["changed"]:
+        proposal["summary"] = "That version is already the current content."
+    return proposal
+
+
 def undo_last_edit(
     *,
     executor: SandboxExecutor,
@@ -312,10 +383,13 @@ def undo_last_edit(
 __all__ = [
     "EditError",
     "NothingToUndo",
+    "RevisionNotFound",
     "StaleEditError",
     "apply_edit",
     "build_proposal",
+    "build_restore_proposal",
     "diff_stats",
+    "list_edit_history",
     "propose_edit",
     "undo_last_edit",
     "unified_diff",

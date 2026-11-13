@@ -6,6 +6,7 @@ import { ActivityBar } from './ActivityBar'
 import { SideBar } from './SideBar'
 import { EditorArea } from './EditorArea'
 import { EditReview, type EditProposal } from './EditReview'
+import { HistoryPanel, type EditHistoryEntry } from './HistoryPanel'
 import { Panel } from './Panel'
 import { StatusBar } from './StatusBar'
 import { VoiceStatus } from './VoiceStatus'
@@ -277,12 +278,18 @@ function CodeSpaceShell({
   const [pendingEdit, setPendingEdit] = useState<EditProposal | null>(null)
   const [editBusy, setEditBusy] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyEntries, setHistoryEntries] = useState<EditHistoryEntry[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historySignedIn, setHistorySignedIn] = useState(true)
   const [lastUserGoal, setLastUserGoal] = useState('')
 
   const pendingExplanationRef = useRef<PendingExplanation | null>(null)
   const lastUserGoalRef = useRef('')
   const skipNextAutoParseRef = useRef<string | null>(null)
   const explainedPathsRef = useRef<Set<string>>(new Set())
+  const historyPathRef = useRef('')
   const folderInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -294,6 +301,10 @@ function CodeSpaceShell({
   useEffect(() => {
     lastUserGoalRef.current = lastUserGoal
   }, [lastUserGoal])
+  useEffect(() => {
+    // The history list is scoped to the active file.
+    setHistoryOpen(false)
+  }, [activeFile])
 
   const messageIdRef = useRef(0)
   const streamingLeoIdRef = useRef<number | null>(null)
@@ -714,6 +725,8 @@ function CodeSpaceShell({
             setEditBusy(false)
             setEditError(null)
             setPendingExplanation(null)
+            setHistoryOpen(false)
+            setHistoryLoading(false)
             setTabs((prev) =>
               prev.some((tab) => tab.path === p)
                 ? prev
@@ -726,6 +739,9 @@ function CodeSpaceShell({
           }
           case 'edit-result': {
             setEditBusy(false)
+            setHistoryLoading(false)
+            if (msg.message) pushMessage('leo', String(msg.message))
+            if (msg.action === 'restore') setHistoryOpen(false)
             if (msg.ok) {
               setPendingEdit(null)
               setEditError(null)
@@ -748,6 +764,31 @@ function CodeSpaceShell({
               )
                 setPendingEdit(null)
             }
+            break
+          }
+          case 'edit-history': {
+            // Ignore a late response for a file the user has already left.
+            if (msg.path && msg.path !== historyPathRef.current) break
+            const revisions: EditHistoryEntry[] = (
+              Array.isArray(msg.revisions) ? msg.revisions : []
+            )
+              .map((raw: Record<string, unknown>): EditHistoryEntry => ({
+                id: Number(raw.id) || 0,
+                path: String(raw.path || ''),
+                summary: String(raw.summary || ''),
+                created_at:
+                  typeof raw.created_at === 'string' ? raw.created_at : null,
+                undone_at:
+                  typeof raw.undone_at === 'string' ? raw.undone_at : null,
+                added: Number(raw.added) || 0,
+                removed: Number(raw.removed) || 0,
+              }))
+              .filter((entry: EditHistoryEntry) => entry.id > 0)
+            setHistoryEntries(revisions)
+            setHistorySignedIn(msg.signed_in !== false)
+            setHistoryLoading(false)
+            setHistoryError(null)
+            setHistoryOpen(true)
             break
           }
           case 'transcript': {
@@ -910,6 +951,8 @@ function CodeSpaceShell({
           case 'error': {
             const message = String(msg.error || '')
             setLogs((prev) => [...prev, `ERROR: ${message}`])
+            setHistoryLoading(false)
+            setHistoryError(message)
             // A failed turn does not close the socket, so only report a
             // disconnection when the connection is actually gone.
             const connected = ws.readyState === WebSocket.OPEN
@@ -1742,6 +1785,51 @@ function CodeSpaceShell({
     pushLog(`> Undoing the last agent edit to ${activeFile}…`)
   }
 
+  const loadHistory = () => {
+    if (!activeFile) return
+    historyPathRef.current = activeFile
+    setHistoryOpen(true)
+    setHistoryEntries([])
+    setHistoryError(null)
+    setHistoryLoading(true)
+    if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      setHistoryLoading(false)
+      setHistorySignedIn(Boolean(user.email))
+      setHistoryError('The voice socket is not connected. Reconnecting…')
+      connectRef.current()
+      return
+    }
+    socketRef.current.send(
+      JSON.stringify({ type: 'history', path: activeFile }),
+    )
+  }
+
+  const toggleHistory = () => {
+    if (historyOpen) {
+      setHistoryOpen(false)
+      return
+    }
+    loadHistory()
+  }
+
+  const restoreRevision = (revisionId: number) => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      setHistoryLoading(false)
+      setHistoryError('The voice socket is not connected. Reconnecting…')
+      connectRef.current()
+      return
+    }
+    setHistoryLoading(true)
+    setHistoryError(null)
+    socketRef.current.send(
+      JSON.stringify({
+        type: 'restore_edit',
+        revision_id: revisionId,
+        path: activeFile || '',
+      }),
+    )
+  }
+
   const fileCount = files.filter((entry) => entry.kind === 'file').length
   const dirCount = files.filter((entry) => entry.kind === 'dir').length
   return (
@@ -1791,6 +1879,14 @@ function CodeSpaceShell({
             ttsStatus={ttsStatus}
           />
           <VoiceStatus voiceStatus={voiceStatus} />
+          <button
+            onClick={toggleHistory}
+            disabled={!activeFile}
+            className="text-xs px-2.5 py-1.5 rounded-md border border-white/10 bg-white/5 text-white/65 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            title="Browse agent edit history for this file"
+          >
+            History
+          </button>
           <button
             onClick={undoLastEdit}
             disabled={!activeFile}
@@ -2030,15 +2126,27 @@ function CodeSpaceShell({
               ) : null}
             </div>
           )}
-          {pendingEdit && (
-            <EditReview
-              proposal={pendingEdit}
-              busy={editBusy}
-              dirty={pendingEditDirty}
-              error={editError}
-              onAccept={acceptPendingEdit}
-              onReject={rejectPendingEdit}
+          {historyOpen ? (
+            <HistoryPanel
+              entries={historyEntries}
+              path={activeFile || ''}
+              loading={historyLoading}
+              error={historyError}
+              signedIn={historySignedIn}
+              onRestore={restoreRevision}
+              onClose={() => setHistoryOpen(false)}
             />
+          ) : (
+            pendingEdit && (
+              <EditReview
+                proposal={pendingEdit}
+                busy={editBusy}
+                dirty={pendingEditDirty}
+                error={editError}
+                onAccept={acceptPendingEdit}
+                onReject={rejectPendingEdit}
+              />
+            )
           )}
           <EditorArea
             tabs={openTabs}
