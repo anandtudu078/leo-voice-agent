@@ -19,6 +19,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -40,6 +41,15 @@ logger = logging.getLogger(__name__)
 # the engine is created.
 import repository
 from db import init_db, ping_database
+from edits import (
+    EditError,
+    NothingToUndo,
+    StaleEditError,
+    apply_edit,
+    build_proposal,
+    propose_edit,
+    undo_last_edit,
+)
 from pipeline.orchestrator import plan_from_transcript
 
 
@@ -132,6 +142,24 @@ class SignInResponse(JSONResponse):
 
 class EmailRequest(BaseModel):
     email: str
+
+
+class ProposeEditRequest(BaseModel):
+    path: str
+    transcript: str
+    selection: str = ""
+    history: list[dict] | None = None
+
+
+class ApplyEditRequest(BaseModel):
+    path: str
+    old_code: str
+    new_code: str
+    summary: str = ""
+
+
+class UndoEditRequest(BaseModel):
+    path: str = ""
 
 
 def _email_signin_response(user: dict) -> JSONResponse:
@@ -449,6 +477,9 @@ async def get_capabilities():
             "client_to_server": [
                 {"type": "audio", "data": "base64(plain/wav/mp3) audio bytes"},
                 {"type": "text", "text": "voice or text command"},
+                {"type": "accept_edit", "path": "apply the pending diff"},
+                {"type": "reject_edit", "path": "discard the pending diff"},
+                {"type": "undo_edit", "path": "restore the last applied edit"},
             ],
             "server_to_client": [
                 {"type": "transcript", "text": "transcribed text"},
@@ -456,6 +487,8 @@ async def get_capabilities():
                 {"type": "plan", "action": "", "tool": "", "reason": ""},
                 {"type": "assigned", "tool": "", "file": ""},
                 {"type": "logs", "logs": []},
+                {"type": "edit-proposal", "path": "", "summary": "", "diff": ""},
+                {"type": "edit-result", "ok": True, "action": "apply|reject|undo"},
                 {"type": "turn-started"},
                 {"type": "waiting", "message": ""},
                 {"type": "listening", "message": ""},
@@ -595,6 +628,68 @@ def _workspace_summary(workspace: Path) -> str:
     return f"Files in the user's workspace: {shown}{more}."
 
 
+# ---------------------------------------------------------------------------
+# Voice intent helpers for the reviewable-edit loop
+# ---------------------------------------------------------------------------
+
+_EDIT_VERBS = re.compile(
+    r"\b(change|update|modify|edit|fix|refactor|rename|improve|optimize|adjust|"
+    r"replace|rewrite|add|remove|insert|append|simplify|clean|make|write)\b",
+    re.IGNORECASE,
+)
+_NOT_AN_EDIT = re.compile(
+    r"\b(explain|teach|describe|what|why|how|create|new|folder|directory|run|"
+    r"execute|start|open|show|read|view|list|undo|revert)\b",
+    re.IGNORECASE,
+)
+_FILE_REQUEST = re.compile(
+    r"\b(?:add|make|write|create|need)\s+(?:a\s+|the\s+)?(?:new\s+)?file\b",
+    re.IGNORECASE,
+)
+_ACCEPT_EDIT = re.compile(
+    r"^\s*(yes|yeah|yep|sure|ok|okay|apply|accept|looks\s+good|do\s+it|go\s+ahead)\b",
+    re.IGNORECASE,
+)
+_REJECT_EDIT = re.compile(
+    r"^\s*(no|nope|nah|cancel|reject|discard|don'?t|do\s+not)\b",
+    re.IGNORECASE,
+)
+_UNDO_EDIT = re.compile(r"\b(undo|revert)\b", re.IGNORECASE)
+_FILE_IN_TEXT = re.compile(r"\b([A-Za-z0-9_./-]+\.[A-Za-z][A-Za-z0-9]*)\b")
+
+
+def _clean_path(raw: str | None) -> str:
+    value = (raw or "").strip().strip('"').strip("'").strip("`")
+    return re.sub(r"[.,!?;:]+$", "", value).strip()
+
+
+def _target_file_path(transcript: str, active_path: str | None = None) -> str | None:
+    """Prefer an explicit path in the request, then the file the user has open."""
+    match = _FILE_IN_TEXT.search(transcript or "")
+    if match:
+        return _clean_path(match.group(1))
+    return _clean_path(active_path) or None
+
+
+def _is_edit_request(transcript: str) -> bool:
+    text = (transcript or "").strip()
+    if not text or _NOT_AN_EDIT.search(text) or _FILE_REQUEST.search(text):
+        return False
+    return bool(_EDIT_VERBS.search(text))
+
+
+def _is_accept_edit(transcript: str) -> bool:
+    return bool(_ACCEPT_EDIT.match(transcript or ""))
+
+
+def _is_reject_edit(transcript: str) -> bool:
+    return bool(_REJECT_EDIT.match(transcript or ""))
+
+
+def _is_undo_request(transcript: str) -> bool:
+    return bool(_UNDO_EDIT.search(transcript or ""))
+
+
 async def _generate_reply(
     transcript: str,
     history: list[dict] | None = None,
@@ -697,12 +792,261 @@ async def websocket_process_voice(websocket: WebSocket):
 
     # Earlier turns of this conversation, so follow-ups have context.
     history: list[dict] = []
+    # The last proposal is held per connection so voice "yes"/"no" and the
+    # Accept/Reject buttons all resolve against the same diff.
+    pending_edit: dict | None = None
+    last_opened_path: str | None = None
 
-    async def run_turn(transcript: str) -> None:
+    def _read_existing(path: str | None) -> str | None:
+        if not path:
+            return None
+        try:
+            return workspace_executor.read(workspace, path)
+        except SandboxExecutionError:
+            return None
+
+    async def finish_turn(reply: str, *, streamed: bool) -> None:
+        """Send the final reply, remember the turn, and speak it."""
+        await websocket.send_json(
+            {"type": "reply", "text": reply, "tts": "pending", "streamed": streamed}
+        )
+        history.extend(
+            [
+                {"role": "user", "text": transcript_for_turn},
+                {"role": "model", "text": reply},
+            ]
+        )
+        del history[:-12]
+        if workspace_id is not None:
+            asyncio.create_task(
+                asyncio.to_thread(
+                    repository.record_voice_turn, workspace_id, transcript_for_turn, reply
+                )
+            )
+        try:
+            audio = await _speak(reply)
+        except HTTPException as exc:
+            await websocket.send_json({"type": "error", "error": str(exc.detail)})
+            audio = b""
+        except Exception as exc:  # noqa: BLE001
+            await websocket.send_json({"type": "error", "error": str(exc)})
+            audio = b""
+        await websocket.send_json(
+            {
+                "type": "speech",
+                "speech": base64.b64encode(audio).decode("ascii") if audio else "",
+                "text": reply,
+                "audio_only": True,
+            }
+        )
+        await websocket.send_json({"type": "listening", "message": "I'm listening now."})
+
+    async def apply_pending(expected_path: str | None = None) -> tuple[bool, str]:
+        nonlocal pending_edit
+        proposal = pending_edit
+        if proposal is None:
+            await websocket.send_json(
+                {"type": "edit-result", "ok": False, "action": "apply", "error": "No pending edit."}
+            )
+            return False, "There is no pending edit to apply."
+        if expected_path and proposal.get("path") != expected_path:
+            message = f"The pending edit is for {proposal.get('path')}, not {expected_path}."
+            await websocket.send_json(
+                {"type": "edit-result", "ok": False, "action": "apply", "error": message}
+            )
+            return False, message
+        try:
+            result = await asyncio.to_thread(
+                apply_edit,
+                executor=workspace_executor,
+                workspace=workspace,
+                workspace_id=workspace_id,
+                path=proposal["path"],
+                old_code=proposal["old_code"],
+                new_code=proposal["new_code"],
+                summary=proposal.get("summary", ""),
+            )
+        except StaleEditError as exc:
+            pending_edit = None
+            current = _read_existing(proposal.get("path"))
+            if current is not None:
+                await websocket.send_json(
+                    {"type": "file", "path": proposal["path"], "content": current}
+                )
+            await websocket.send_json(
+                {
+                    "type": "edit-result",
+                    "ok": False,
+                    "action": "apply",
+                    "path": proposal.get("path"),
+                    "error": str(exc),
+                }
+            )
+            return False, str(exc)
+        except EditError as exc:
+            await websocket.send_json(
+                {
+                    "type": "edit-result",
+                    "ok": False,
+                    "action": "apply",
+                    "path": proposal.get("path"),
+                    "error": str(exc),
+                }
+            )
+            return False, str(exc)
+
+        pending_edit = None
+        await websocket.send_json(
+            {
+                "type": "file",
+                "path": result["path"],
+                "content": result["content"],
+                "origin": "edit",
+            }
+        )
+        await websocket.send_json(
+            {
+                "type": "logs",
+                "logs": [f"> Applied edit to {result['path']}"],
+                "files": _workspace_files(workspace),
+            }
+        )
+        await websocket.send_json(
+            {
+                "type": "edit-result",
+                "ok": True,
+                "action": "apply",
+                "path": result["path"],
+                "content": result["content"],
+                "revision_id": result.get("revision_id"),
+                "undo_available": result.get("undo_available", False),
+                "summary": result.get("summary", ""),
+            }
+        )
+        return True, f"Applied the edit to {result['path']}."
+
+    async def reject_pending() -> None:
+        nonlocal pending_edit
+        path = pending_edit.get("path") if pending_edit else ""
+        pending_edit = None
+        await websocket.send_json(
+            {"type": "edit-result", "ok": True, "action": "reject", "path": path}
+        )
+
+    async def perform_undo(path: str | None) -> tuple[bool, str]:
+        nonlocal pending_edit
+        # Undo means abandon any proposal that has not been applied yet.
+        pending_edit = None
+        try:
+            result = await asyncio.to_thread(
+                undo_last_edit,
+                executor=workspace_executor,
+                workspace=workspace,
+                workspace_id=workspace_id,
+                path=path,
+            )
+        except (NothingToUndo, StaleEditError, EditError) as exc:
+            await websocket.send_json(
+                {"type": "edit-result", "ok": False, "action": "undo", "error": str(exc)}
+            )
+            return False, str(exc)
+        await websocket.send_json(
+            {
+                "type": "file",
+                "path": result["path"],
+                "content": result["content"],
+                "origin": "edit",
+            }
+        )
+        await websocket.send_json(
+            {
+                "type": "logs",
+                "logs": [f"> Restored {result['path']}"],
+                "files": _workspace_files(workspace),
+            }
+        )
+        await websocket.send_json(
+            {
+                "type": "edit-result",
+                "ok": True,
+                "action": "undo",
+                "path": result["path"],
+                "content": result["content"],
+            }
+        )
+        return True, f"Restored {result['path']} to its previous version."
+
+    async def send_proposal(proposal: dict, reply: str) -> None:
+        nonlocal pending_edit
+        if not proposal.get("changed"):
+            await finish_turn(
+                proposal.get("summary") or f"No changes to {proposal.get('path', 'the file')}.",
+                streamed=False,
+            )
+            return
+        pending_edit = proposal
+        await websocket.send_json({"type": "edit-proposal", **proposal})
+        await finish_turn(reply, streamed=False)
+
+    # `finish_turn` uses the current transcript; set per turn below.
+    transcript_for_turn = ""
+
+    async def run_turn(
+        transcript: str, active_path: str | None = None, selection: str = ""
+    ) -> None:
         import re as _re
+
+        nonlocal pending_edit, transcript_for_turn
+        transcript_for_turn = transcript
+        tl = (transcript or "").lower()
+        target_path = _target_file_path(transcript, active_path or last_opened_path)
+        target_content = _read_existing(target_path)
 
         await websocket.send_json({"type": "turn-started"})
         await websocket.send_json({"type": "waiting", "message": "Thinking..."})
+
+        # 1. Undo is always available by voice, even while a proposal is pending.
+        if _is_undo_request(transcript):
+            _ok, message = await perform_undo(target_path)
+            await finish_turn(message, streamed=False)
+            return
+
+        # 2. Resolve a pending proposal by voice before starting new work.
+        if pending_edit is not None:
+            if _is_accept_edit(transcript):
+                _ok, message = await apply_pending()
+                await finish_turn(message, streamed=False)
+                return
+            if _is_reject_edit(transcript):
+                await reject_pending()
+                await finish_turn("Discarded the pending edit.", streamed=False)
+                return
+            # A different command discards the proposal; tell the client so
+            # its review panel does not outlive the server-side state.
+            await reject_pending()
+
+        # 3. Edit an existing file through a reviewable proposal, not a blind write.
+        if target_path and target_content is not None and _is_edit_request(transcript):
+            try:
+                proposal = await asyncio.to_thread(
+                    propose_edit,
+                    provider=llm_provider,
+                    model=GEMINI_MODEL,
+                    path=target_path,
+                    transcript=transcript,
+                    current_code=target_content,
+                    history=history,
+                    selection=selection,
+                )
+            except EditError as exc:
+                await finish_turn(str(exc), streamed=False)
+                return
+            await send_proposal(
+                proposal,
+                f"I prepared an edit to {target_path}. Review the diff, then accept or reject it.",
+            )
+            return
+
         loop = asyncio.get_running_loop()
         delta_q: asyncio.Queue[str | None] = asyncio.Queue()
         streamed = False
@@ -736,7 +1080,6 @@ async def websocket_process_voice(websocket: WebSocket):
                 await delta_q.put(None); await drain_task
             except Exception:
                 pass
-            tl = (transcript or "").lower()
             if _re.search(r"\b(run|execute|start)\b", tl):
                 m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", transcript or "")
                 if m:
@@ -760,78 +1103,66 @@ async def websocket_process_voice(websocket: WebSocket):
         except Exception:
             pass
 
-        # If the user asked to write/create/update code and the agent replied with a
-        # fenced code block, persist it to the target file (coding-agent behavior) and
-        # notify the client so the editor/codespace shows the code.
+        # If the agent's reply contains a fenced code block for an existing file,
+        # turn it into a reviewable proposal instead of overwriting the file.
         try:
-            tl = (transcript or "").lower()
             wants_code = bool(
                 _re.search(
                     r"\b(write|add|implement|create|update|modify|change|put|insert|include|generate|build|make|define|code|function|class|script|program)\b",
                     tl,
                 )
             )
-            file_m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", transcript or "")
+            file_m = _FILE_IN_TEXT.search(transcript or "")
             if not file_m:
-                file_m = _re.search(r"\b([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)\b", reply or "")
+                file_m = _FILE_IN_TEXT.search(reply or "")
             code_m = _re.search(r"```(?:[a-zA-Z0-9_+-]+)?\s*\n(.*?)```", reply or "", flags=_re.DOTALL)
             if wants_code and file_m and code_m:
                 target_path = file_m.group(1).strip().strip('"').strip("'").strip("`")
                 code_text = (code_m.group(1) or "").rstrip() + "\n"
                 if target_path and code_text.strip():
-                    saved = workspace_executor.write(workspace, target_path, code_text)
-                    if workspace_id is not None:
-                        try:
-                            await asyncio.to_thread(
-                                repository.save_file_snapshot, workspace_id, target_path, code_text
+                    existing = _read_existing(target_path)
+                    if existing is not None:
+                        proposal = build_proposal(
+                            target_path,
+                            existing,
+                            code_text,
+                            f"Updated {target_path} from your request.",
+                        )
+                        if proposal["changed"]:
+                            pending_edit = proposal
+                            await websocket.send_json({"type": "edit-proposal", **proposal})
+                            await websocket.send_json(
+                                {
+                                    "type": "logs",
+                                    "logs": [f"> Prepared a reviewable edit for {target_path}"],
+                                    "files": _workspace_files(workspace),
+                                }
                             )
-                        except Exception:
-                            pass
-                    await websocket.send_json({"type": "file", "path": target_path, "content": code_text})
-                    await websocket.send_json(
-                        {
-                            "type": "logs",
-                            "logs": [f"> Saved {target_path} ({saved})"],
-                            "files": _workspace_files(workspace),
-                        }
-                    )
+                    else:
+                        saved = workspace_executor.write(workspace, target_path, code_text)
+                        if workspace_id is not None:
+                            try:
+                                await asyncio.to_thread(
+                                    repository.save_file_snapshot, workspace_id, target_path, code_text
+                                )
+                            except Exception:
+                                pass
+                        await websocket.send_json({"type": "file", "path": target_path, "content": code_text})
+                        await websocket.send_json(
+                            {
+                                "type": "logs",
+                                "logs": [f"> Saved {target_path} ({saved})"],
+                                "files": _workspace_files(workspace),
+                            }
+                        )
         except Exception:
             # Never fail the conversational turn because of auto-save.
             pass
 
-        # Finalize streamed text (or send full reply), then synthesize/play audio after.
-        await websocket.send_json({"type": "reply", "text": reply, "tts": "pending", "streamed": streamed})
-        history.extend(
-            [
-                {"role": "user", "text": transcript},
-                {"role": "model", "text": reply},
-            ]
-        )
-        del history[:-12]
-        if workspace_id is not None:
-            asyncio.create_task(
-                asyncio.to_thread(repository.record_voice_turn, workspace_id, transcript, reply)
-            )
-        try:
-            audio = await _speak(reply)
-        except HTTPException as exc:
-            await websocket.send_json({"type": "error", "error": str(exc.detail)})
-            audio = b""
-        except Exception as exc:  # noqa: BLE001
-            await websocket.send_json({"type": "error", "error": str(exc)})
-            audio = b""
-        await websocket.send_json(
-            {
-                "type": "speech",
-                "speech": base64.b64encode(audio).decode("ascii") if audio else "",
-                "text": reply,
-                "audio_only": True,
-            }
-        )
-        await websocket.send_json({"type": "listening", "message": "I'm listening now."})
+        await finish_turn(reply, streamed=streamed)
 
 
-    async def handle_audio(audio: bytes) -> None:
+    async def handle_audio(audio: bytes, active_path: str | None = None) -> None:
         try:
             transcript = await asyncio.to_thread(
                 stt_client.transcribe, audio, "microphone.wav", "audio/wav"
@@ -840,7 +1171,7 @@ async def websocket_process_voice(websocket: WebSocket):
             await websocket.send_json({"type": "error", "error": str(exc)})
             return
         await websocket.send_json({"type": "transcript", "transcript": transcript})
-        await run_turn(transcript)
+        await run_turn(transcript, active_path=active_path or last_opened_path)
 
     try:
         while True:
@@ -879,13 +1210,18 @@ async def websocket_process_voice(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "error": "Bad audio payload"})
                     continue
                 if audio:
-                    await handle_audio(audio)
+                    await handle_audio(audio, active_path=path or last_opened_path)
 
             elif msg_type == "text":
                 transcript = str(payload.get("text") or "").strip()
                 if transcript:
+                    selection = str(payload.get("selection") or "")
                     await websocket.send_json({"type": "transcript", "transcript": transcript})
-                    await run_turn(transcript)
+                    await run_turn(
+                        transcript,
+                        active_path=path or last_opened_path,
+                        selection=selection,
+                    )
 
             elif msg_type in {"read_file", "editFile", "edit_file", "open_file"}:
                 try:
@@ -893,10 +1229,38 @@ async def websocket_process_voice(websocket: WebSocket):
                 except SandboxExecutionError as exc:
                     await websocket.send_json({"type": "error", "error": str(exc)})
                     continue
+                last_opened_path = path or last_opened_path
                 await websocket.send_json({"type": "file", "path": path, "content": content})
+
+            elif msg_type == "accept_edit":
+                await apply_pending(path or None)
+
+            elif msg_type == "reject_edit":
+                await reject_pending()
+
+            elif msg_type == "undo_edit":
+                await perform_undo(path or last_opened_path)
 
             elif msg_type in {"create_file", "write_file"}:
                 code = str(payload.get("code") or "")
+                existing = _read_existing(path)
+                if existing is not None and existing != code:
+                    proposal = build_proposal(
+                        path,
+                        existing,
+                        code,
+                        f"Updated {path} from your request.",
+                    )
+                    pending_edit = proposal
+                    await websocket.send_json({"type": "edit-proposal", **proposal})
+                    await websocket.send_json(
+                        {
+                            "type": "logs",
+                            "logs": [f"> Prepared a reviewable edit for {path}"],
+                            "files": _workspace_files(workspace),
+                        }
+                    )
+                    continue
                 try:
                     saved = workspace_executor.write(workspace, path, code)
                 except SandboxExecutionError as exc:
@@ -1372,6 +1736,90 @@ async def tts_synthesize(text: str):
         return {"audio": "", "type": "empty"}
     audio = await _speak(text)
     return {"audio": base64.b64encode(audio).decode("ascii"), "type": "base64"}
+
+
+# ---------------------------------------------------------------------------
+# Context-aware edit proposals (review before write)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/agent/propose-edit")
+async def propose_edit_endpoint(request: Request, payload: ProposeEditRequest):
+    """Return a reviewable diff for a requested edit; writes nothing."""
+    workspace, _ = await _workspace_context(request.state.session)
+    path = payload.path.strip()
+    transcript = payload.transcript.strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="path is required")
+    if not transcript:
+        raise HTTPException(status_code=400, detail="transcript is required")
+    try:
+        current = await asyncio.to_thread(workspace_executor.read, workspace, path)
+    except SandboxExecutionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        proposal = await asyncio.to_thread(
+            propose_edit,
+            provider=llm_provider,
+            model=GEMINI_MODEL,
+            path=path,
+            transcript=transcript,
+            current_code=current,
+            history=payload.history or [],
+            selection=payload.selection,
+        )
+    except EditError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return proposal
+
+
+@app.post("/api/agent/apply-edit")
+async def apply_edit_endpoint(request: Request, payload: ApplyEditRequest):
+    """Apply a reviewed diff if the file still matches the proposal's base."""
+    workspace, workspace_id = await _workspace_context(request.state.session)
+    try:
+        result = await asyncio.to_thread(
+            apply_edit,
+            executor=workspace_executor,
+            workspace=workspace,
+            workspace_id=workspace_id,
+            path=payload.path,
+            old_code=payload.old_code,
+            new_code=payload.new_code,
+            summary=payload.summary,
+        )
+    except StaleEditError as exc:
+        current = None
+        try:
+            current = await asyncio.to_thread(
+                workspace_executor.read, workspace, payload.path
+            )
+        except SandboxExecutionError:
+            pass
+        return JSONResponse(
+            {"detail": str(exc), "current_content": current}, status_code=409
+        )
+    except EditError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "files": _workspace_files(workspace)}
+
+
+@app.post("/api/agent/undo")
+async def undo_edit_endpoint(request: Request, payload: UndoEditRequest):
+    """Restore the newest un-undone agent edit for a file or workspace."""
+    workspace, workspace_id = await _workspace_context(request.state.session)
+    path = payload.path.strip() or None
+    try:
+        result = await asyncio.to_thread(
+            undo_last_edit,
+            executor=workspace_executor,
+            workspace=workspace,
+            workspace_id=workspace_id,
+            path=path,
+        )
+    except (NothingToUndo, StaleEditError, EditError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {**result, "files": _workspace_files(workspace)}
 
 
 if __name__ == "__main__":

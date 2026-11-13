@@ -26,6 +26,7 @@ Leo Voice Agent is a **free, forever** voice-driven IDE where you can:
 | Autonomous: create file, folder, run script | ✅ Working |
 | **Edit file command** | ✅ Implemented |
 | **Opt-in code explanation walkthrough (v1)** | ✅ Implemented |
+| **Reviewable diff edits + undo** | ✅ Implemented |
 | VS Code-style terminal navigation (ArrowUp/Down) | ✅ Implemented |
 | Keep-alive workflow (10min health ping) | ✅ Working |
 | README updated | ✅ Updated |
@@ -106,6 +107,25 @@ This feature is designed to help users learn the language, syntax, and programmi
 4. **Walkthrough UI:** the editor highlights the current line range, auto-scrolls to it, and shows **What it does**, **Why we wrote it**, and **Syntax/concepts**. You can use **Prev/Next/Close** or the editor **Explain** button to review code again.
 
 **API:** `POST /api/explain-code` accepts `{ path, code?, language?, goal? }` and returns structured steps (`startLine`, `endLine`, `title`, `what`, `why`, `syntax`, plus `provider`). Leo tries the configured primary LLM (`GEMINI` by default) and falls back to `GROQ` on retryable errors (rate limits/quota, timeouts, 5xx/overloaded) or when the primary provider is unavailable; if LLM output is unusable or no provider succeeds, it falls back to a deterministic line-based explainer (`provider: fallback`). v1 is text-only (no TTS narration yet).
+
+### Reviewable Edits & Undo (Tier 1)
+
+Leo never blind-writes over an existing file. When a voice or text request targets a file that is already open (or named in the request), Leo asks the model for a complete updated version, turns it into a unified diff, and sends it to the editor as a reviewable proposal.
+
+1. **Proposal:** the file stays untouched; the editor shows the diff with added/removed line counts and a short summary.
+2. **Review:** choose **Accept edit** or **Reject**, or say **“apply”** / **“reject”**. Nothing is written until you accept.
+3. **Stale-write protection:** if the file changed since the proposal was generated, the edit is rejected instead of clobbering newer content.
+4. **Undo:** use the **Undo** button or say **“undo that”** to restore the last applied agent edit. Each applied edit records a before/after revision in the database.
+
+The proposal prompt includes the active file, the recent conversation, and optional selected text, so follow-ups like “make it faster” or “change line 12” work without restating the file.
+
+**API:**
+
+- `POST /api/agent/propose-edit` — `{ path, transcript, selection?, history? }` → `{ path, old_code, new_code, diff, summary, added, removed, changed, provider }`; writes nothing.
+- `POST /api/agent/apply-edit` — `{ path, old_code, new_code, summary? }` → applies only if the file still matches `old_code` (409 otherwise).
+- `POST /api/agent/undo` — `{ path? }` → restores the newest un-undone edit for that file or workspace.
+
+WebSocket clients can also use `edit-proposal` / `edit-result` events and send `accept_edit`, `reject_edit`, or `undo_edit`.
 
 ### Technical Features
 
@@ -223,6 +243,7 @@ Checks `/api/health`, `/openapi.json`, and `/ws/process-voice` handshake.
 | **Phase 3** | Hands-free recording, voice session persistence, enhanced execution results |
 | **Phase 4** | ✅ Autonomous voice commands, edit file command, terminal navigation |
 | **Phase 5** | ✅ Opt-in line-by-line code explanation walkthrough (v1, text-only) |
+| **Phase 6** | ✅ Context-aware diff proposals, accept/reject review, stale-write protection, undo |
 | **Future** | TTS narration for explanations, language-aware/AST chunking, explanation tests, delete file command, multi-file operations, git integration |
 
 ## 🐛 Known Issues

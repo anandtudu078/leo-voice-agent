@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { ActivityBar } from './ActivityBar'
 import { SideBar } from './SideBar'
 import { EditorArea } from './EditorArea'
+import { EditReview, type EditProposal } from './EditReview'
 import { Panel } from './Panel'
 import { StatusBar } from './StatusBar'
 import { VoiceStatus } from './VoiceStatus'
@@ -98,6 +99,28 @@ async function fetchExplanation(payload: {
 
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+// Keep reviewable-edit commands out of the legacy autonomous write path.
+// The voice socket turns these into diff proposals instead.
+function looksLikeEditTranscript(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (
+    /\b(explain|teach|describe|what|why|how|create|new|folder|directory|run|execute|start|open|show|read|view|list|undo|revert)\b/i.test(
+      t,
+    )
+  )
+    return false
+  if (
+    /\b(?:add|make|write|create|need)\s+(?:a\s+|the\s+)?(?:new\s+)?file\b/i.test(
+      t,
+    )
+  )
+    return false
+  return /\b(change|update|modify|edit|fix|refactor|rename|improve|optimize|adjust|replace|rewrite|add|remove|insert|append|simplify|clean|make|write)\b/i.test(
+    t,
+  )
 }
 
 function isWithin(path: string, base: string): boolean {
@@ -251,6 +274,9 @@ function CodeSpaceShell({
   const [pendingExplanation, setPendingExplanation] =
     useState<PendingExplanation | null>(null)
   const [explanation, setExplanation] = useState<ExplanationState | null>(null)
+  const [pendingEdit, setPendingEdit] = useState<EditProposal | null>(null)
+  const [editBusy, setEditBusy] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
   const [lastUserGoal, setLastUserGoal] = useState('')
 
   const pendingExplanationRef = useRef<PendingExplanation | null>(null)
@@ -263,12 +289,16 @@ function CodeSpaceShell({
     pendingExplanationRef.current = pendingExplanation
   }, [pendingExplanation])
   useEffect(() => {
+    filesRef.current = files
+  }, [files])
+  useEffect(() => {
     lastUserGoalRef.current = lastUserGoal
   }, [lastUserGoal])
 
   const messageIdRef = useRef(0)
   const streamingLeoIdRef = useRef<number | null>(null)
   const offlineRef = useRef(false)
+  const filesRef = useRef<WorkspaceEntry[]>([])
   const unmountingRef = useRef(false)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectRef = useRef<() => void>(() => {})
@@ -314,6 +344,11 @@ function CodeSpaceShell({
   const dirtyPaths = tabs
     .filter((tab) => tab.content !== tab.saved)
     .map((tab) => tab.path)
+  const pendingEditTab = pendingEdit
+    ? tabs.find((tab) => tab.path === pendingEdit.path)
+    : null
+  const pendingEditDirty =
+    !!pendingEditTab && pendingEditTab.content !== pendingEditTab.saved
 
   const socketRef = useRef<WebSocket | null>(null)
   const recorderRef = useRef<WavRecorder | null>(null)
@@ -632,7 +667,12 @@ function CodeSpaceShell({
                 )
               })
               // v1: after the agent writes code, ask before explaining it.
-              if (content.trim() && !explainedPathsRef.current.has(p)) {
+              // Edits applied through review/undo are not new code, so skip.
+              if (
+                content.trim() &&
+                msg.origin !== 'edit' &&
+                !explainedPathsRef.current.has(p)
+              ) {
                 explainedPathsRef.current.add(p)
                 const goal = lastUserGoalRef.current || transcript || ''
                 const language = p.endsWith('.py')
@@ -657,6 +697,59 @@ function CodeSpaceShell({
               }
             }
             break
+          case 'edit-proposal': {
+            const p = typeof msg.path === 'string' ? msg.path : ''
+            if (!p) break
+            const oldCode = typeof msg.old_code === 'string' ? msg.old_code : ''
+            const newCode = typeof msg.new_code === 'string' ? msg.new_code : ''
+            setPendingEdit({
+              path: p,
+              old_code: oldCode,
+              new_code: newCode,
+              diff: String(msg.diff || ''),
+              summary: String(msg.summary || ''),
+              added: Number(msg.added) || 0,
+              removed: Number(msg.removed) || 0,
+            })
+            setEditBusy(false)
+            setEditError(null)
+            setPendingExplanation(null)
+            setTabs((prev) =>
+              prev.some((tab) => tab.path === p)
+                ? prev
+                : [...prev, { path: p, content: oldCode, saved: oldCode }],
+            )
+            setActiveFile(p)
+            setPanelOpen(true)
+            setLogs((prev) => [...prev, `> Review edit: ${p}`])
+            break
+          }
+          case 'edit-result': {
+            setEditBusy(false)
+            if (msg.ok) {
+              setPendingEdit(null)
+              setEditError(null)
+              if (msg.action) {
+                setLogs((prev) => [
+                  ...prev,
+                  `> Edit ${String(msg.action)}: ${String(msg.path || '')}`,
+                ])
+              }
+            } else {
+              const error = String(
+                msg.error || 'The edit could not be applied.',
+              )
+              setEditError(error)
+              setLogs((prev) => [...prev, `ERROR: ${error}`])
+              // Drop proposals the server no longer has (stale base, reconnect,
+              // or a different pending file).
+              if (
+                /changed after|no pending edit|pending edit is for/i.test(error)
+              )
+                setPendingEdit(null)
+            }
+            break
+          }
           case 'transcript': {
             const t = msg.transcript || ''
             setTranscript(t)
@@ -703,7 +796,8 @@ function CodeSpaceShell({
           case 'logs': {
             const lines: string[] = Array.isArray(msg.logs) ? msg.logs : []
             setLogs((prev) => [...prev, ...lines])
-            if (Array.isArray(msg.files) && msg.files.length > 0) setFiles(msg.files)
+            if (Array.isArray(msg.files) && msg.files.length > 0)
+              setFiles(msg.files)
             // Safety net: when the backend saves a file (including from agent/tool flows),
             // re-read it so the editor/codespace stays in sync with disk.
             try {
@@ -928,6 +1022,21 @@ function CodeSpaceShell({
         // handled (explain yes/no)
       } else {
         lastParsedTranscriptRef.current = trimmed
+        // Existing-file edits are proposed as diffs by the voice socket.
+        // Running the legacy parser too would generate a second copy and
+        // auto-write it, bypassing review. With no target file, let the
+        // legacy create-file path handle requests like "write a script".
+        const namesAnOpenOrKnownFile = filesRef.current.some(
+          (entry) =>
+            entry.kind === 'file' &&
+            trimmed.toLowerCase().includes(entry.name.toLowerCase()),
+        )
+        if (
+          (activeFile || namesAnOpenOrKnownFile) &&
+          looksLikeEditTranscript(trimmed)
+        ) {
+          return
+        }
         // Parse the transcript using the backend /api/parse-voice-command
         fetch('/api/parse-voice-command', {
           method: 'POST',
@@ -953,6 +1062,18 @@ function CodeSpaceShell({
       const path = autoCommandPayload?.path || 'untitled.py'
       const code = autoCommandPayload?.code || ''
       if (socketRef.current?.readyState === WebSocket.OPEN) {
+        // Never blind-write over an existing file: the socket has either
+        // already sent an edit proposal or will do so for this request.
+        if (
+          filesRef.current.some(
+            (entry) => entry.path === path && entry.kind === 'file',
+          )
+        ) {
+          pushLog(`> Preparing a reviewable edit to ${path}`)
+          setAutoCommand(null)
+          setAutoCommandPayload(null)
+          return
+        }
         socketRef.current.send(
           JSON.stringify({ type: 'write_file', path, code }),
         )
@@ -1003,7 +1124,14 @@ function CodeSpaceShell({
       }
       return
     }
-  }, [transcript, autoCommand, autoCommandPayload, socketRef])
+  }, [
+    transcript,
+    autoCommand,
+    autoCommandPayload,
+    activeFile,
+    pushLog,
+    socketRef,
+  ])
   // ---- File operations (HTTP workspace API) ----
   const openFile = async (path: string) => {
     if (tabs.some((tab) => tab.path === path)) {
@@ -1134,8 +1262,7 @@ function CodeSpaceShell({
 
   const openSystemFolder = async () => {
     const picker = (window as any).showDirectoryPicker as
-      | undefined
-      | (() => Promise<any>)
+      undefined | (() => Promise<any>)
     if (picker) {
       try {
         const dirHandle = await (window as any).showDirectoryPicker({
@@ -1190,7 +1317,9 @@ function CodeSpaceShell({
     const folderName =
       filesArr[0] &&
       (filesArr[0] as any).webkitRelativePath &&
-      String((filesArr[0] as any).webkitRelativePath).split('/').filter(Boolean)[0]
+      String((filesArr[0] as any).webkitRelativePath)
+        .split('/')
+        .filter(Boolean)[0]
         ? String((filesArr[0] as any).webkitRelativePath)
             .split('/')
             .filter(Boolean)[0]
@@ -1385,7 +1514,13 @@ function CodeSpaceShell({
       }
       const base64 = await blobToDataUrl(blob)
       if (base64 && socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: 'audio', data: base64 }))
+        socketRef.current.send(
+          JSON.stringify({
+            type: 'audio',
+            data: base64,
+            path: activeFile || '',
+          }),
+        )
         setVoiceStatus('processing')
         setSttStatus('listening')
       } else {
@@ -1547,9 +1682,64 @@ function CodeSpaceShell({
       connectRef.current()
       return
     }
-    socketRef.current.send(JSON.stringify({ type: 'text', text }))
+    socketRef.current.send(
+      JSON.stringify({ type: 'text', text, path: activeFile || '' }),
+    )
     setCommandInput('')
     setPanelTab('voice')
+  }
+
+  const acceptPendingEdit = () => {
+    if (!pendingEdit) return
+    setPendingExplanation(null)
+    if (pendingEditDirty) {
+      setEditError(
+        'Save or discard your unsaved editor changes before applying this edit.',
+      )
+      return
+    }
+    if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      setEditError('The voice socket is not connected. Reconnecting…')
+      connectRef.current()
+      return
+    }
+    setEditBusy(true)
+    setEditError(null)
+    socketRef.current.send(
+      JSON.stringify({ type: 'accept_edit', path: pendingEdit.path }),
+    )
+  }
+
+  const rejectPendingEdit = () => {
+    if (!pendingEdit) return
+    const path = pendingEdit.path
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'reject_edit', path }))
+    }
+    setPendingEdit(null)
+    setEditBusy(false)
+    setEditError(null)
+    pushLog(`> Rejected the proposed edit to ${path}`)
+  }
+
+  const undoLastEdit = () => {
+    if (!activeFile) return
+    setPendingExplanation(null)
+    const tab = tabs.find((item) => item.path === activeFile)
+    if (tab && tab.content !== tab.saved) {
+      pushLog(
+        'ERROR: save or discard your unsaved changes before undoing an edit',
+      )
+      return
+    }
+    if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      pushLog('ERROR: voice socket is not connected — cannot undo right now')
+      return
+    }
+    socketRef.current.send(
+      JSON.stringify({ type: 'undo_edit', path: activeFile }),
+    )
+    pushLog(`> Undoing the last agent edit to ${activeFile}…`)
   }
 
   const fileCount = files.filter((entry) => entry.kind === 'file').length
@@ -1601,6 +1791,14 @@ function CodeSpaceShell({
             ttsStatus={ttsStatus}
           />
           <VoiceStatus voiceStatus={voiceStatus} />
+          <button
+            onClick={undoLastEdit}
+            disabled={!activeFile}
+            className="text-xs px-2.5 py-1.5 rounded-md border border-white/10 bg-white/5 text-white/65 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            title="Undo the last agent edit to this file (or say “undo that”)"
+          >
+            Undo
+          </button>
           <button
             onClick={toggleRecording}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border transition-all ${
@@ -1832,6 +2030,16 @@ function CodeSpaceShell({
               ) : null}
             </div>
           )}
+          {pendingEdit && (
+            <EditReview
+              proposal={pendingEdit}
+              busy={editBusy}
+              dirty={pendingEditDirty}
+              error={editError}
+              onAccept={acceptPendingEdit}
+              onReject={rejectPendingEdit}
+            />
+          )}
           <EditorArea
             tabs={openTabs}
             activeTab={activeTab}
@@ -1904,8 +2112,13 @@ function CodeSpaceShell({
                   {!logs.length && !transcript && (
                     <div className="flex h-full min-h-[90px] items-center justify-center text-center text-white/35">
                       <div>
-                        <div className="mb-1 text-sm text-white/55">No output yet</div>
-                        <div>Press <span className="text-white/60">Speak</span> or run a file to see results here.</div>
+                        <div className="mb-1 text-sm text-white/55">
+                          No output yet
+                        </div>
+                        <div>
+                          Press <span className="text-white/60">Speak</span> or
+                          run a file to see results here.
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1961,8 +2174,12 @@ function CodeSpaceShell({
                   {!logs.length && (
                     <div className="flex h-full min-h-[90px] items-center justify-center text-center text-white/35">
                       <div>
-                        <div className="mb-1 text-sm text-white/55">Terminal is ready</div>
-                        <div>Run the active file to stream execution output here.</div>
+                        <div className="mb-1 text-sm text-white/55">
+                          Terminal is ready
+                        </div>
+                        <div>
+                          Run the active file to stream execution output here.
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1976,9 +2193,12 @@ function CodeSpaceShell({
                   Problems
                 </div>
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-emerald-100/80">
-                  <div className="font-medium text-emerald-200">No problems detected</div>
+                  <div className="font-medium text-emerald-200">
+                    No problems detected
+                  </div>
                   <div className="mt-1 text-[11px] text-emerald-100/55">
-                    Lint, runtime, and command issues will appear here when available.
+                    Lint, runtime, and command issues will appear here when
+                    available.
                   </div>
                 </div>
               </div>
@@ -2004,8 +2224,14 @@ function CodeSpaceShell({
                   {messages.length === 0 && (
                     <div className="flex h-full min-h-[90px] items-center justify-center text-center text-xs text-white/35">
                       <div>
-                        <div className="mb-1 text-sm text-white/55">Voice & chat</div>
-                        <div>Press <span className="text-white/60">Speak</span> or type below to ask Leo to create, edit, or explain code.</div>
+                        <div className="mb-1 text-sm text-white/55">
+                          Voice & chat
+                        </div>
+                        <div>
+                          Press <span className="text-white/60">Speak</span> or
+                          type below to ask Leo to create, edit, or explain
+                          code.
+                        </div>
                       </div>
                     </div>
                   )}
